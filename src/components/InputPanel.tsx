@@ -40,9 +40,10 @@ export function InputPanel({ inputs, targetCrv, errors, onChange, onCrvChange }:
   const crvBase =
     entry !== null && stop !== null && validLossPerUsd(direction, entry, stop) !== null ? { entry, stop } : null;
   const crv = crvBase !== null && tp !== null ? crvFromPrices(direction, crvBase.entry, crvBase.stop, tp) : null;
-  // While the CRV field is focused it keeps the typed text; otherwise it shows the derived CRV.
+  // Accepted CRV shown by the slider and, unless being edited, the field. While the field is focused it
+  // keeps the typed draft instead; the slider never follows a draft.
+  const crvShown = formatDe(crv ?? targetCrv ?? DEFAULT_CRV, 2);
   const [crvDraft, setCrvDraft] = useState<string | null>(null);
-  const crvText = crvDraft ?? formatDe(crv ?? targetCrv ?? DEFAULT_CRV, 2);
   const crvTyped = crvDraft === null ? null : tpInputForCrvText(inputs, crvDraft);
   const crvError = crvTyped !== null && "error" in crvTyped ? (crvTyped.error ?? undefined) : undefined;
   // Slider and field set the CRV target; an invalid or unreachable CRV leaves target and TP unchanged.
@@ -118,9 +119,10 @@ export function InputPanel({ inputs, targetCrv, errors, onChange, onCrvChange }:
         <SliderField
           id="crv"
           label="CRV (setzt TP)"
-          value={crvText}
+          value={crvShown}
+          draft={crvDraft}
           onChange={setCrv}
-          onFocus={() => setCrvDraft(crvText)}
+          onFocus={() => setCrvDraft(crvShown)}
           onBlur={() => setCrvDraft(null)}
           {...CRV_SLIDER}
           unit="R"
@@ -234,8 +236,10 @@ function NumberField({ id, label, value, onChange, unit, hint, optional, error }
 interface SliderFieldProps {
   id: string;
   label: string;
-  /** Raw typed value; the slider follows it. */
+  /** Raw value; the slider follows it. */
   value: string;
+  /** Text the typed field shows instead of `value` while it is being edited; the slider ignores it. */
+  draft?: string | null;
   /** Called by both the slider and the typed field. */
   onChange: (value: string) => void;
   /** Focus and blur of the typed field. */
@@ -263,6 +267,7 @@ function SliderField({
   id,
   label,
   value,
+  draft,
   onChange,
   onFocus,
   onBlur,
@@ -310,7 +315,7 @@ function SliderField({
             {...(integer
               ? { type: "number", inputMode: "numeric", min, max, step }
               : { type: "text", inputMode: "decimal", autoComplete: "off", spellCheck: false })}
-            value={value}
+            value={draft ?? value}
             onChange={(e) => onChange(e.target.value)}
             onFocus={onFocus}
             onBlur={onBlur}
