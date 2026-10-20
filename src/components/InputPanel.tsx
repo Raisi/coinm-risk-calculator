@@ -8,8 +8,12 @@ import { DEFAULT_CRV, tpInputForCrvText } from "@/lib/form";
 
 interface InputPanelProps {
   inputs: RawInputs;
+  /** CRV TP is derived from; `null` while TP is typed. Shown while TP is empty. */
+  targetCrv: number | null;
   errors: InputError[];
   onChange: (patch: Partial<RawInputs>) => void;
+  /** A CRV from the slider or the CRV field; ignored when not reachable. */
+  onCrvChange: (crv: number) => void;
 }
 
 const ASSUMPTION_FIELDS: NumericField[] = ["bufferPct", "mmr", "safetyFactor", "nearFactor"];
@@ -17,10 +21,10 @@ const ASSUMPTION_FIELDS: NumericField[] = ["bufferPct", "mmr", "safetyFactor", "
 /** Drag range of the risk slider in whole percent; finer values like 0,25 are typed. 0 % shows the "> 0" error. */
 const RISK_SLIDER = { min: 0, max: 100, step: 1 } as const;
 
-/** CRV slider range in R; position while TP is empty or invalid. */
+/** CRV slider range in R; position while the CRV field holds no number. */
 const CRV_SLIDER = { min: 0.5, max: 10, step: 0.1, fallback: DEFAULT_CRV } as const;
 
-export function InputPanel({ inputs, errors, onChange }: InputPanelProps) {
+export function InputPanel({ inputs, targetCrv, errors, onChange, onCrvChange }: InputPanelProps) {
   // Missing fields are listed in the status panel; inline messages are for wrong values only.
   const fieldError = (field: NumericField) =>
     errors.find((e) => e.field === field && e.kind !== "missing")?.message;
@@ -31,21 +35,21 @@ export function InputPanel({ inputs, errors, onChange }: InputPanelProps) {
   const entry = parseNumber(inputs.entry);
   const stop = parseNumber(inputs.stop);
   const tp = parseNumber(inputs.tp);
-  // Entry/stop the CRV slider and field work from; `null` disables them. They show the CRV of the current TP.
+  // Entry/stop the CRV slider and field work from; `null` disables them. They show the CRV of the current
+  // TP, or while TP is empty the CRV target.
   const crvBase =
     entry !== null && stop !== null && validLossPerUsd(direction, entry, stop) !== null ? { entry, stop } : null;
   const crv = crvBase !== null && tp !== null ? crvFromPrices(direction, crvBase.entry, crvBase.stop, tp) : null;
-  // While the CRV field is focused it keeps the typed text; otherwise it shows the CRV derived from TP.
+  // While the CRV field is focused it keeps the typed text; otherwise it shows the derived CRV.
   const [crvDraft, setCrvDraft] = useState<string | null>(null);
-  const crvText = crvDraft ?? formatDe(crv ?? DEFAULT_CRV, 2);
+  const crvText = crvDraft ?? formatDe(crv ?? targetCrv ?? DEFAULT_CRV, 2);
   const crvTyped = crvDraft === null ? null : tpInputForCrvText(inputs, crvDraft);
   const crvError = crvTyped !== null && "error" in crvTyped ? (crvTyped.error ?? undefined) : undefined;
-  // Slider and field both write the TP for the CRV on the price tick and hand TP to the user; an
-  // unreachable or invalid CRV keeps the current TP.
+  // Slider and field set the CRV target; an invalid or unreachable CRV leaves target and TP unchanged.
   const setCrv = (text: string) => {
     if (crvDraft !== null) setCrvDraft(text);
-    const next = tpInputForCrvText(inputs, text);
-    onChange({ tp: "tp" in next ? next.tp : inputs.tp });
+    const value = parseNumber(text);
+    if (value !== null) onCrvChange(value);
   };
 
   const field = (

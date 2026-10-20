@@ -1,5 +1,5 @@
 /**
- * Form state transitions: raw inputs plus who owns the take-profit field.
+ * Form state transitions: raw inputs plus what the take-profit is derived from (a CRV or the typed TP).
  * Pure, no React.
  */
 
@@ -7,13 +7,13 @@ import { maxReachableCrv, tpOnTickForCrv, validLossPerUsd } from "./calc";
 import { DEFAULT_INPUTS, type RawInputs } from "./evaluate";
 import { formatDe, parseNumber, toPlainDecimal } from "./format";
 
-/** CRV the take-profit is filled for until the user sets TP themselves. */
+/** Initial CRV target: TP is filled for it as soon as entry and stop allow. */
 export const DEFAULT_CRV = 2;
 
 /** Decimals of the Bitunix BTC price tick (0.1 USD); a TP derived from a CRV is rounded to it. */
 export const TP_DECIMALS = 1;
 
-/** Fields the auto-filled TP is derived from. */
+/** Fields a TP derived from a CRV target is recomputed from. */
 const TP_SOURCE_FIELDS: readonly (keyof RawInputs)[] = ["direction", "entry", "stop"];
 
 /**
@@ -64,27 +64,43 @@ export function tpInputForCrvText(
 }
 
 /**
- * `tpAuto`: TP follows entry/stop/direction at `DEFAULT_CRV`. Becomes `false` for good once the user
- * sets TP or the CRV (typing, pasting, clearing, the CRV slider or the CRV field, even when the CRV is
- * not reachable and TP keeps its value).
+ * What TP is derived from: a CRV (`crv`), so entry/stop/direction changes recompute TP for it, or the
+ * TP the user typed (`tp`), which stays while the CRV follows entry/stop/TP.
  */
+export type TpTarget = { kind: "crv"; crv: number } | { kind: "tp" };
+
 export interface FormState {
   inputs: RawInputs;
-  tpAuto: boolean;
+  target: TpTarget;
 }
 
-export const INITIAL_FORM_STATE: FormState = { inputs: DEFAULT_INPUTS, tpAuto: true };
+export const INITIAL_FORM_STATE: FormState = {
+  inputs: DEFAULT_INPUTS,
+  target: { kind: "crv", crv: DEFAULT_CRV },
+};
+
+/** `patch`: form field edits; `crv`: a CRV set by the slider or the CRV field. */
+export type FormAction = { type: "patch"; patch: Partial<RawInputs> } | { type: "crv"; crv: number };
 
 /**
- * Merges a form patch. A patch carrying `tp` hands TP to the user and keeps that value. Otherwise, in
- * auto mode, a change to entry, stop or direction sets TP to the `DEFAULT_CRV` price, or "" when there
- * is none; all other fields leave TP alone.
+ * - `patch` carrying `tp`: TP target, TP kept as given.
+ * - other `patch`: merged; with a CRV target, a change to entry, stop or direction recomputes TP for it,
+ *   or "" when it is not reachable. All other fields leave TP alone.
+ * - `crv`: when reachable (see `tpInputForCrv`) it becomes the target and TP is set for it; otherwise
+ *   the state is returned unchanged.
  */
-export function applyInputPatch(state: FormState, patch: Partial<RawInputs>): FormState {
-  const inputs = { ...state.inputs, ...patch };
-  if (patch.tp !== undefined) return { inputs, tpAuto: false };
-  if (state.tpAuto && TP_SOURCE_FIELDS.some((field) => patch[field] !== undefined)) {
-    inputs.tp = tpInputForCrv(inputs, DEFAULT_CRV) ?? "";
+export function formReducer(state: FormState, action: FormAction): FormState {
+  if (action.type === "crv") {
+    const tp = tpInputForCrv(state.inputs, action.crv);
+    if (tp === null) return state;
+    return { inputs: { ...state.inputs, tp }, target: { kind: "crv", crv: action.crv } };
   }
-  return { inputs, tpAuto: state.tpAuto };
+  const { patch } = action;
+  const inputs = { ...state.inputs, ...patch };
+  if (patch.tp !== undefined) return { inputs, target: { kind: "tp" } };
+  const { target } = state;
+  if (target.kind === "crv" && TP_SOURCE_FIELDS.some((field) => patch[field] !== undefined)) {
+    inputs.tp = tpInputForCrv(inputs, target.crv) ?? "";
+  }
+  return { inputs, target };
 }

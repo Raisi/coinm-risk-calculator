@@ -2,13 +2,13 @@
 
 import { useMemo, useReducer } from "react";
 import { evaluate } from "@/lib/evaluate";
-import { applyInputPatch, INITIAL_FORM_STATE } from "@/lib/form";
+import { formReducer, INITIAL_FORM_STATE } from "@/lib/form";
 import { InputPanel } from "./InputPanel";
 import { Results } from "./Results";
 import { Warnings } from "./Warnings";
 
 export function Calculator() {
-  const [{ inputs }, applyPatch] = useReducer(applyInputPatch, INITIAL_FORM_STATE);
+  const [{ inputs, target }, dispatch] = useReducer(formReducer, INITIAL_FORM_STATE);
   const result = useMemo(() => evaluate(inputs), [inputs]);
 
   return (
@@ -16,7 +16,9 @@ export function Calculator() {
       <InputPanel
         inputs={inputs}
         errors={result.ok ? [] : result.errors}
-        onChange={applyPatch}
+        targetCrv={target.kind === "crv" ? target.crv : null}
+        onChange={(patch) => dispatch({ type: "patch", patch })}
+        onCrvChange={(crv) => dispatch({ type: "crv", crv })}
       />
       <div className="outputs">
         <Warnings result={result} />

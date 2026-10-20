@@ -2,12 +2,14 @@ import { describe, expect, it } from "vitest";
 import { crvFromPrices, type Direction } from "./calc";
 import { DEFAULT_INPUTS, type RawInputs } from "./evaluate";
 import {
-  applyInputPatch,
   crvUnreachableText,
+  DEFAULT_CRV,
+  formReducer,
   INITIAL_FORM_STATE,
   tpInputForCrv,
   tpInputForCrvText,
   type CrvTextResult,
+  type FormAction,
   type FormState,
 } from "./form";
 import { parseNumber } from "./format";
@@ -15,30 +17,51 @@ import { parseNumber } from "./format";
 /** Plain dot decimal on the 0.1 tick: no grouping, no exponent, no trailing ".0". */
 const PLAIN_TICK = /^(0|[1-9]\d*)(\.\d)?$/;
 
-/** Applies the patches in order, as successive keystrokes / UI events would. */
-function applyAll(state: FormState, patches: Partial<RawInputs>[]): FormState {
-  return patches.reduce(applyInputPatch, state);
+function patch(fields: Partial<RawInputs>): FormAction {
+  return { type: "patch", patch: fields };
+}
+
+function setCrv(crv: number): FormAction {
+  return { type: "crv", crv };
+}
+
+/** Dispatches the actions in order, as successive keystrokes / UI events would. */
+function run(state: FormState, actions: FormAction[]): FormState {
+  return actions.reduce(formReducer, state);
 }
 
 /** One patch per prefix of `value`, i.e. typing it character by character. */
-function typed(field: "entry" | "stop" | "tp", value: string): Partial<RawInputs>[] {
-  return Array.from({ length: value.length }, (_, i) => ({ [field]: value.slice(0, i + 1) }));
+function typed(field: "entry" | "stop" | "tp", value: string): FormAction[] {
+  return Array.from({ length: value.length }, (_, i) => patch({ [field]: value.slice(0, i + 1) }));
 }
 
-/** Like `applyAll`, but records the TP after every patch. */
-function tpTrace(state: FormState, patches: Partial<RawInputs>[]): { final: FormState; tps: string[] } {
+/** Like `run`, but records the TP after every action. */
+function tpTrace(state: FormState, actions: FormAction[]): { final: FormState; tps: string[] } {
   const tps: string[] = [];
   let current = state;
-  for (const patch of patches) {
-    current = applyInputPatch(current, patch);
+  for (const action of actions) {
+    current = formReducer(current, action);
     tps.push(current.inputs.tp);
   }
   return { final: current, tps };
 }
 
-/** Auto-mode state with direction/entry/stop set and TP filled for CRV 2. */
-function autoState(direction: Direction, entry: string, stop: string): FormState {
-  return applyAll(INITIAL_FORM_STATE, [{ direction }, { entry }, { stop }]);
+/** Direction/entry/stop set from the initial state: CRV target 2, TP filled for it when reachable. */
+function trade(direction: Direction, entry: string, stop: string): FormState {
+  return run(INITIAL_FORM_STATE, [patch({ direction }), patch({ entry }), patch({ stop })]);
+}
+
+/** `trade` followed by a typed TP: TP target. */
+function tpModeTrade(direction: Direction, entry: string, stop: string, tp: string): FormState {
+  return formReducer(trade(direction, entry, stop), patch({ tp }));
+}
+
+function deepFreeze<T>(value: T): T {
+  if (value !== null && typeof value === "object") {
+    for (const child of Object.values(value)) deepFreeze(child);
+    Object.freeze(value);
+  }
+  return value;
 }
 
 /**
@@ -64,14 +87,6 @@ function expectCrvBracketedByTick(
   expect(crvAway as number).toBeGreaterThanOrEqual(crv);
 }
 
-/** BTC-scale trades: CRV of the tick price is ≈ 2 and CRV 2 is bracketed by tp ± 0.05. */
-function expectCrv2WithinTick(direction: Direction, entry: number, stop: number, tpInput: string): void {
-  const crv = crvFromPrices(direction, entry, stop, parseNumber(tpInput) as number);
-  expect(crv).not.toBeNull();
-  expect(crv as number).toBeCloseTo(2, 2);
-  expectCrvBracketedByTick(direction, entry, stop, 2, tpInput);
-}
-
 const NON_TRADE_PATCHES: Partial<RawInputs>[] = [
   { balance: "0.5" },
   { balance: "" },
@@ -89,314 +104,386 @@ const NON_TRADE_PATCHES: Partial<RawInputs>[] = [
   { panelLiq: "90000" },
 ];
 
+// Expected TPs below come from exact rational arithmetic, rounded to the nearest 0.1 USD:
+//   long  tp = 1 / (1/entry − crv·(1/stop − 1/entry))
+//   short tp = 1 / (1/entry + crv·(1/entry − 1/stop))
+// A long CRV is reachable only below stop / (entry − stop); a short one always (above the 0.1 tick).
+
 describe("INITIAL_FORM_STATE", () => {
-  it("starts in auto mode with an empty TP and the default inputs", () => {
-    expect(INITIAL_FORM_STATE.tpAuto).toBe(true);
+  it("starts with the default inputs, an empty TP and a CRV-2 target", () => {
+    expect(DEFAULT_CRV).toBe(2);
+    expect(INITIAL_FORM_STATE).toEqual({ inputs: DEFAULT_INPUTS, target: { kind: "crv", crv: 2 } });
     expect(INITIAL_FORM_STATE.inputs.tp).toBe("");
-    expect(INITIAL_FORM_STATE.inputs).toEqual(DEFAULT_INPUTS);
   });
 });
 
-describe("applyInputPatch – auto mode", () => {
-  it("long: entry then stop typed char by char fills TP for CRV 2 once feasible", () => {
+describe("formReducer – CRV target follows entry/stop", () => {
+  it("long: entry then stop typed char by char fills TP for CRV 2 once reachable", () => {
     const entry = tpTrace(INITIAL_FORM_STATE, typed("entry", "108000"));
     // No stop yet: nothing to derive TP from.
     expect(entry.tps).toEqual(["", "", "", "", "", ""]);
-    expect(entry.final.tpAuto).toBe(true);
+    expect(entry.final.target).toEqual({ kind: "crv", crv: 2 });
 
     const stop = tpTrace(entry.final, typed("stop", "105500"));
-    // "1".."10550" are below the long bound stop/(entry - stop) > 2: no TP reaches CRV 2.
-    expect(stop.tps.slice(0, -1)).toEqual(["", "", "", "", ""]);
-    const final = stop.final;
-    expect(final.tpAuto).toBe(true);
-    expect(final.inputs.entry).toBe("108000");
-    expect(final.inputs.stop).toBe("105500");
-    expect(final.inputs.tp).toBe("113373.1");
-    expectCrv2WithinTick("long", 108000, 105500, final.inputs.tp);
+    // "1".."10550": stop / (entry − stop) ≤ 0.11 < 2, so no TP reaches CRV 2.
+    // "105500": exact 113373.134…
+    expect(stop.tps).toEqual(["", "", "", "", "", "113373.1"]);
+    expect(stop.final).toEqual({
+      inputs: { ...DEFAULT_INPUTS, entry: "108000", stop: "105500", tp: "113373.1" },
+      target: { kind: "crv", crv: 2 },
+    });
   });
 
   it("long: stop typed first, then entry; wrong-side intermediates give an empty TP", () => {
-    const stop = applyAll(INITIAL_FORM_STATE, typed("stop", "105500"));
+    const stop = run(INITIAL_FORM_STATE, typed("stop", "105500"));
     expect(stop.inputs.tp).toBe("");
-    expect(stop.tpAuto).toBe(true);
+    expect(stop.target).toEqual({ kind: "crv", crv: 2 });
 
     const { final, tps } = tpTrace(stop, typed("entry", "108000"));
     // "1".."10800" are below the stop: wrong side for a long.
-    expect(tps.slice(0, -1)).toEqual(["", "", "", "", ""]);
-    expect(final.inputs.tp).toBe("113373.1");
-    expect(final.tpAuto).toBe(true);
+    expect(tps).toEqual(["", "", "", "", "", "113373.1"]);
+    expect(final.target).toEqual({ kind: "crv", crv: 2 });
   });
 
-  it("recomputes on every change, not only on the first valid one", () => {
-    // Short with the stop set first: every entry prefix 1, 10, 100 is already a valid trade.
-    const start = applyAll(INITIAL_FORM_STATE, [{ direction: "short" }, { stop: "1000" }]);
-    const { final, tps } = tpTrace(start, typed("entry", "100"));
-    expect(tps).toEqual(["0.3", "3.4", "35.7"]);
-    expect(final.tpAuto).toBe(true);
+  it("recomputes on every entry/stop change, not only on the first valid one", () => {
+    // Short with the stop set first: every entry prefix 1, 10, 100 is a valid trade.
+    // Exact 0.33355…, 3.3557…, 35.714…
+    const start = run(INITIAL_FORM_STATE, [patch({ direction: "short" }), patch({ stop: "1000" })]);
+    expect(tpTrace(start, typed("entry", "100")).tps).toEqual(["0.3", "3.4", "35.7"]);
 
-    // Editing a valid stop again moves TP with it, and back to "" when it becomes unusable.
-    const long = autoState("long", "108000", "105500");
-    const moved = applyInputPatch(long, { stop: "106000" });
-    expect(moved.inputs.tp).toBe("112235.3");
-    expectCrv2WithinTick("long", 108000, 106000, moved.inputs.tp);
-    const backspaced = applyInputPatch(moved, { stop: "10600" });
-    expect(backspaced.inputs.tp).toBe("");
-    const retyped = applyInputPatch(backspaced, { stop: "105505" });
-    expect(retyped.inputs.tp).toBe("113361.6");
-    expectCrv2WithinTick("long", 108000, 105505, retyped.inputs.tp);
-    expect(retyped.tpAuto).toBe(true);
+    // Exact 112235.294…, then "" (stop 10600 has no CRV-2 price), then exact 113361.587…
+    const { final, tps } = tpTrace(trade("long", "108000", "105500"), [
+      patch({ stop: "106000" }),
+      patch({ stop: "10600" }),
+      patch({ stop: "105505" }),
+    ]);
+    expect(tps).toEqual(["112235.3", "", "113361.6"]);
+    expect(final.target).toEqual({ kind: "crv", crv: 2 });
   });
 
   it("short: entry and stop typed char by char fill TP below entry for CRV 2", () => {
-    const start = applyInputPatch(INITIAL_FORM_STATE, { direction: "short" });
-    expect(start.inputs.tp).toBe("");
-    const withEntry = applyAll(start, typed("entry", "108000"));
+    const withEntry = run(INITIAL_FORM_STATE, [patch({ direction: "short" }), ...typed("entry", "108000")]);
+    expect(withEntry.inputs.tp).toBe("");
     const { final, tps } = tpTrace(withEntry, typed("stop", "110500"));
-    // "1".."11050" are below entry: wrong side for a short.
-    expect(tps.slice(0, -1)).toEqual(["", "", "", "", ""]);
-    expect(final.inputs.tp).toBe("103324.7");
-    expect(final.tpAuto).toBe(true);
-    expectCrv2WithinTick("short", 108000, 110500, final.inputs.tp);
+    // "1".."11050" are below entry: wrong side for a short. "110500": exact 103324.675…
+    expect(tps).toEqual(["", "", "", "", "", "103324.7"]);
+    expect(final.target).toEqual({ kind: "crv", crv: 2 });
   });
 
-  it("direction switch recomputes TP, emptying it when the stop ends up on the wrong side", () => {
-    const long = autoState("long", "108000", "105500");
-    expect(long.inputs.tp).toBe("113373.1");
+  it("CRV 3 sets TP and becomes the target; a stop change recomputes for 3", () => {
+    const base = trade("long", "108000", "105500");
+    expect(base.inputs.tp).toBe("113373.1");
 
-    const short = applyInputPatch(long, { direction: "short" });
-    expect(short.inputs.direction).toBe("short");
-    expect(short.inputs.tp).toBe("");
-    expect(short.tpAuto).toBe(true);
+    // Exact 116265.306…
+    const crv3 = formReducer(base, setCrv(3));
+    expect(crv3).toEqual({ inputs: { ...base.inputs, tp: "116265.3" }, target: { kind: "crv", crv: 3 } });
 
-    const shortStop = applyInputPatch(short, { stop: "110500" });
-    expect(shortStop.inputs.tp).toBe("103324.7");
-
-    const backToLong = applyInputPatch(shortStop, { direction: "long" });
-    expect(backToLong.inputs.tp).toBe("");
-
-    const longAgain = applyAll(long, [{ direction: "short" }, { direction: "long" }]);
-    expect(longAgain.inputs.tp).toBe("113373.1");
+    // 1 / (4/108000 − 3/106000) = 114480 exactly: no trailing ".0".
+    const moved = formReducer(crv3, patch({ stop: "106000" }));
+    expect(moved).toEqual({
+      inputs: { ...base.inputs, stop: "106000", tp: "114480" },
+      target: { kind: "crv", crv: 3 },
+    });
   });
 
-  it("re-sending the current direction still recomputes (no stale TP)", () => {
+  it("CRV 4 on 108000/106000, then stop 105000 recomputes for 4", () => {
+    // Exact 116816.326…, then exact 121935.483…
+    const { final, tps } = tpTrace(trade("long", "108000", "106000"), [setCrv(4), patch({ stop: "105000" })]);
+    expect(tps).toEqual(["116816.3", "121935.5"]);
+    expect(final.target).toEqual({ kind: "crv", crv: 4 });
+  });
+
+  it("short 108000/111000 CRV 3 gives 99900", () => {
+    // 1 / (4/108000 − 3/111000) = 99900 exactly.
+    const state = formReducer(trade("short", "108000", "111000"), setCrv(3));
+    expect(state.inputs.tp).toBe("99900");
+    expect(state.target).toEqual({ kind: "crv", crv: 3 });
+  });
+
+  it("a CRV just below the long bound is still reachable", () => {
+    // Bound 105500 / 2500 = 42.2; CRV 42.19: exact 455760000.
+    const state = formReducer(trade("long", "108000", "105500"), setCrv(42.19));
+    expect(state.inputs.tp).toBe("455760000");
+    expect(state.target).toEqual({ kind: "crv", crv: 42.19 });
+  });
+
+  it("a reachable CRV action overwrites a stale TP", () => {
     const stale: FormState = {
       inputs: { ...DEFAULT_INPUTS, entry: "108000", stop: "105500", tp: "999" },
-      tpAuto: true,
+      target: { kind: "crv", crv: 2 },
     };
-    expect(applyInputPatch(stale, { direction: "long" }).inputs.tp).toBe("113373.1");
-  });
-
-  it("infeasible long (stop/(entry - stop) <= 2) gives an empty TP", () => {
-    expect(autoState("long", "100", "60").inputs.tp).toBe("");
-    // Exactly at the bound: 60 / (90 - 60) = 2.
-    expect(autoState("long", "90", "60").inputs.tp).toBe("");
-    // A feasible TP is replaced by "" when the trade turns infeasible.
-    const feasible = autoState("long", "108000", "105500");
-    const infeasible = applyAll(feasible, [{ entry: "100" }, { stop: "60" }]);
-    expect(infeasible.inputs.tp).toBe("");
-    expect(infeasible.tpAuto).toBe(true);
-  });
-
-  it("missing, unparsable or wrong-side entry/stop give an empty TP", () => {
-    const valid = autoState("long", "108000", "105500");
-    expect(applyInputPatch(valid, { entry: "" }).inputs.tp).toBe("");
-    expect(applyInputPatch(valid, { stop: "" }).inputs.tp).toBe("");
-    expect(applyInputPatch(valid, { stop: "abc" }).inputs.tp).toBe("");
-    expect(applyInputPatch(valid, { entry: "1e5" }).inputs.tp).toBe("");
-    expect(applyInputPatch(valid, { stop: "108000" }).inputs.tp).toBe("");
-    expect(applyInputPatch(valid, { stop: "110000" }).inputs.tp).toBe("");
-    expect(applyInputPatch(valid, { stop: "-105500" }).inputs.tp).toBe("");
+    expect(formReducer(stale, setCrv(2)).inputs.tp).toBe("113373.1");
+    // Re-sending the current direction is an entry/stop/direction change: recomputes too.
+    expect(formReducer(stale, patch({ direction: "long" })).inputs.tp).toBe("113373.1");
   });
 
   it("accepts German-formatted entry/stop and writes TP as a plain dot decimal", () => {
-    const state = autoState("long", "108.000,0", "105.500");
-    // "105.500" without a comma is the dot decimal 105.5: wrong side.
+    const state = trade("long", "108.000,0", "105.500");
+    // "105.500" without a comma is the dot decimal 105.5: no CRV-2 price.
     expect(state.inputs.tp).toBe("");
-    const german = applyInputPatch(state, { stop: "105.500,0" });
-    expect(german.inputs.tp).toBe("113373.1");
+    expect(formReducer(state, patch({ stop: "105.500,0" })).inputs.tp).toBe("113373.1");
   });
 });
 
-describe("applyInputPatch – TP set by the user", () => {
-  const userTpCases: { name: string; patches: (s: FormState) => Partial<RawInputs>[]; tp: string }[] = [
-    { name: "typed char by char", patches: () => typed("tp", "115000"), tp: "115000" },
-    { name: "pasted", patches: () => [{ tp: "115000" }], tp: "115000" },
-    {
-      name: "slider value (CRV 3)",
-      patches: (s) => [{ tp: tpInputForCrv(s.inputs, 3) as string }],
-      tp: "116265.3",
-    },
-    { name: "cleared", patches: () => [{ tp: "" }], tp: "" },
-    { name: "same value as the auto TP", patches: () => [{ tp: "113373.1" }], tp: "113373.1" },
-    { name: "unparsable text", patches: () => [{ tp: "abc" }], tp: "abc" },
+describe("formReducer – unreachable CRV target is kept and refills", () => {
+  it("long 100/80 CRV 3 → stop 70 empties TP, a later feasible stop refills it for 3", () => {
+    // 1 / (4/100 − 3/80) = 400 exactly.
+    const crv3 = formReducer(trade("long", "100", "80"), setCrv(3));
+    expect(crv3.inputs.tp).toBe("400");
+    expect(crv3.target).toEqual({ kind: "crv", crv: 3 });
+
+    // 100/70: bound 70/30 = 7/3 < 3. 100/90: 1 / (4/100 − 3/90) = 150 exactly.
+    const { final, tps } = tpTrace(crv3, [
+      patch({ stop: "70" }),
+      patch({ entry: "" }),
+      patch({ entry: "100" }),
+      patch({ stop: "90" }),
+    ]);
+    expect(tps).toEqual(["", "", "", "150"]);
+    expect(final.target).toEqual({ kind: "crv", crv: 3 });
+  });
+
+  it("the default target 2 waits on infeasible trades and fills once feasible", () => {
+    // 100/60: bound 1.5 < 2; 90/60: exactly at the bound 2.
+    expect(trade("long", "100", "60").inputs.tp).toBe("");
+    expect(trade("long", "90", "60").inputs.tp).toBe("");
+    // 100/70: 1 / (3/100 − 2/70) = 700 exactly.
+    const filled = run(trade("long", "100", "60"), [patch({ stop: "70" })]);
+    expect(filled.inputs.tp).toBe("700");
+    expect(filled.target).toEqual({ kind: "crv", crv: 2 });
+  });
+
+  it.each<[string, Partial<RawInputs>]>([
+    ["empty entry", { entry: "" }],
+    ["empty stop", { stop: "" }],
+    ["unparsable stop", { stop: "abc" }],
+    ["exponent entry", { entry: "1e5" }],
+    ["stop at entry", { stop: "108000" }],
+    ["stop above entry", { stop: "110000" }],
+    ["negative stop", { stop: "-105500" }],
+    ["stop 0", { stop: "0" }],
+  ])("%s empties TP, keeps the CRV target and refills on a usable value", (_, unusable) => {
+    const crv3 = formReducer(trade("long", "108000", "105500"), setCrv(3));
+    const emptied = formReducer(crv3, patch(unusable));
+    expect(emptied.inputs.tp).toBe("");
+    expect(emptied.target).toEqual({ kind: "crv", crv: 3 });
+    const refilled = formReducer(emptied, patch({ entry: "108000", stop: "105500" }));
+    expect(refilled.inputs.tp).toBe("116265.3");
+    expect(refilled.target).toEqual({ kind: "crv", crv: 3 });
+  });
+});
+
+describe("formReducer – direction switch", () => {
+  it("CRV target: recomputes TP, empty while the stop is on the wrong side", () => {
+    const short = formReducer(trade("short", "108000", "111000"), setCrv(3));
+    expect(short.inputs.tp).toBe("99900");
+
+    const { final, tps } = tpTrace(short, [
+      patch({ direction: "long" }),
+      patch({ stop: "106000" }),
+      patch({ direction: "short" }),
+      patch({ stop: "111000" }),
+    ]);
+    // long with stop 111000 above entry: "". Long 108000/106000 CRV 3: 114480. Short with stop below: "".
+    expect(tps).toEqual(["", "114480", "", "99900"]);
+    expect(final.target).toEqual({ kind: "crv", crv: 3 });
+    expect(final.inputs.direction).toBe("short");
+
+    const roundTrip = run(trade("long", "108000", "105500"), [
+      patch({ direction: "short" }),
+      patch({ direction: "long" }),
+    ]);
+    expect(roundTrip.inputs.tp).toBe("113373.1");
+  });
+
+  it("TP target: direction changes keep the typed TP", () => {
+    const user = tpModeTrade("long", "108000", "105500", "115000");
+    const { final, tps } = tpTrace(user, [
+      patch({ direction: "short" }),
+      patch({ stop: "110500" }),
+      patch({ direction: "long" }),
+    ]);
+    expect(tps).toEqual(["115000", "115000", "115000"]);
+    expect(final.target).toEqual({ kind: "tp" });
+  });
+});
+
+describe("formReducer – TP typed by the user", () => {
+  it("CRV 4 → stop → typed TP 115000 stays → CRV 2.5 takes over again", () => {
+    const crv4 = formReducer(trade("long", "108000", "106000"), setCrv(4));
+    expect(crv4.inputs.tp).toBe("116816.3");
+    const stop105 = formReducer(crv4, patch({ stop: "105000" }));
+    expect(stop105.inputs.tp).toBe("121935.5");
+
+    const user = formReducer(stop105, patch({ tp: "115000" }));
+    expect(user).toEqual({ inputs: { ...stop105.inputs, tp: "115000" }, target: { kind: "tp" } });
+
+    const kept = tpTrace(user, [patch({ stop: "106000" }), patch({ entry: "109000" }), patch({ entry: "108000" }), patch({ stop: "105000" })]);
+    expect(kept.tps).toEqual(["115000", "115000", "115000", "115000"]);
+    expect(kept.final.target).toEqual({ kind: "tp" });
+
+    // Exact 116307.692…: back to a CRV target.
+    const crv25 = formReducer(kept.final, setCrv(2.5));
+    expect(crv25).toEqual({
+      inputs: { ...kept.final.inputs, tp: "116307.7" },
+      target: { kind: "crv", crv: 2.5 },
+    });
+    // Exact 113346.534…
+    const recomputed = formReducer(crv25, patch({ stop: "106000" }));
+    expect(recomputed.inputs.tp).toBe("113346.5");
+    expect(recomputed.target).toEqual({ kind: "crv", crv: 2.5 });
+  });
+
+  const userTpCases: { name: string; actions: FormAction[]; tp: string }[] = [
+    { name: "typed char by char", actions: typed("tp", "115000"), tp: "115000" },
+    { name: "pasted", actions: [patch({ tp: "115000" })], tp: "115000" },
+    { name: "cleared", actions: [patch({ tp: "" })], tp: "" },
+    { name: "equal to the current CRV-2 TP", actions: [patch({ tp: "113373.1" })], tp: "113373.1" },
+    { name: "unparsable text", actions: [patch({ tp: "abc" })], tp: "abc" },
   ];
 
-  for (const { name, patches, tp } of userTpCases) {
-    it(`${name}: switches to user mode, keeps the value through later entry/stop/direction changes`, () => {
-      const auto = autoState("long", "108000", "105500");
-      const user = applyAll(auto, patches(auto));
-      expect(user.tpAuto).toBe(false);
+  for (const { name, actions, tp } of userTpCases) {
+    it(`${name}: TP target, value kept through later entry/stop/direction changes`, () => {
+      const user = run(trade("long", "108000", "105500"), actions);
+      expect(user.target).toEqual({ kind: "tp" });
       expect(user.inputs.tp).toBe(tp);
 
       const later = tpTrace(user, [
         ...typed("stop", "106000"),
-        { entry: "109000" },
-        { entry: "" },
-        { stop: "100" },
-        { direction: "short" },
-        { stop: "110500" },
-        { entry: "108000" },
-        { direction: "long" },
-        { stop: "105500" },
+        patch({ entry: "109000" }),
+        patch({ entry: "" }),
+        patch({ stop: "100" }),
+        patch({ direction: "short" }),
+        patch({ stop: "110500" }),
+        patch({ entry: "108000" }),
+        patch({ direction: "long" }),
+        patch({ stop: "105500" }),
       ]);
       expect(later.tps.every((value) => value === tp)).toBe(true);
-      expect(later.final.tpAuto).toBe(false);
+      expect(later.final.target).toEqual({ kind: "tp" });
       expect(later.final.inputs.entry).toBe("108000");
       expect(later.final.inputs.stop).toBe("105500");
     });
   }
 
-  it("slider at CRV 3 yields a TP whose CRV is about 3", () => {
-    const auto = autoState("long", "108000", "105500");
-    const tp = tpInputForCrv(auto.inputs, 3) as string;
-    const user = applyInputPatch(auto, { tp });
-    expect(user.inputs.tp).not.toBe(auto.inputs.tp);
-    expect(crvFromPrices("long", 108000, 105500, parseNumber(user.inputs.tp) as number)).toBeCloseTo(3, 2);
+  it("an empty TP equal to the current (unreachable) one also switches to the TP target", () => {
+    // Long 100/60: bound 1.5 < 2, TP empty.
+    const crv = trade("long", "100", "60");
+    expect(crv.inputs.tp).toBe("");
+    const user = formReducer(crv, patch({ tp: "" }));
+    expect(user.target).toEqual({ kind: "tp" });
+    // With the CRV target, stop 70 would fill 700.
+    expect(formReducer(user, patch({ stop: "70" })).inputs.tp).toBe("");
   });
 
   it("works before entry/stop are set: TP set first is kept when entry and stop arrive", () => {
-    const user = applyAll(INITIAL_FORM_STATE, [
-      { tp: "115000" },
+    const user = run(INITIAL_FORM_STATE, [
+      patch({ tp: "115000" }),
       ...typed("entry", "108000"),
       ...typed("stop", "105500"),
     ]);
-    expect(user.tpAuto).toBe(false);
-    expect(user.inputs.tp).toBe("115000");
+    expect(user).toEqual({
+      inputs: { ...DEFAULT_INPUTS, entry: "108000", stop: "105500", tp: "115000" },
+      target: { kind: "tp" },
+    });
   });
 
-  it("a patch carrying tp together with entry/stop keeps the given tp", () => {
-    const auto = autoState("long", "108000", "105500");
-    const user = applyInputPatch(auto, { entry: "109000", stop: "106000", tp: "120000" });
-    expect(user).toEqual({ inputs: { ...auto.inputs, entry: "109000", stop: "106000", tp: "120000" }, tpAuto: false });
+  it("a patch carrying tp together with entry/stop/direction keeps the given tp", () => {
+    const crv = trade("long", "108000", "105500");
+    const user = formReducer(crv, patch({ direction: "short", entry: "109000", stop: "106000", tp: "120000" }));
+    expect(user).toEqual({
+      inputs: { ...crv.inputs, direction: "short", entry: "109000", stop: "106000", tp: "120000" },
+      target: { kind: "tp" },
+    });
   });
 
-  it("stays in user mode for good: later TP edits keep it user, never back to auto", () => {
-    const user = applyAll(autoState("long", "108000", "105500"), [{ tp: "" }, { tp: "115000" }, { tp: "" }]);
-    expect(user.tpAuto).toBe(false);
-    expect(user.inputs.tp).toBe("");
-    const after = applyAll(user, [{ stop: "106000" }, { direction: "short" }, { direction: "long" }]);
-    expect(after.inputs.tp).toBe("");
-    expect(after.tpAuto).toBe(false);
+  it("CRV action works from the TP target and makes the CRV the target again", () => {
+    const user = tpModeTrade("long", "108000", "105500", "115000");
+    const crv3 = formReducer(user, setCrv(3));
+    expect(crv3).toEqual({ inputs: { ...user.inputs, tp: "116265.3" }, target: { kind: "crv", crv: 3 } });
+    expect(formReducer(crv3, patch({ stop: "106000" })).inputs.tp).toBe("114480");
   });
 });
 
-describe("applyInputPatch – CRV slider/field ownership", () => {
-  it("QA repro long 100/70: re-sending the unchanged auto TP hands TP to the user for good", () => {
-    // Exact CRV-2 TP: 1 / (1/100 − 2 · (1/70 − 1/100)) = 700.
-    const auto = autoState("long", "100", "70");
-    expect(auto.inputs.tp).toBe("700");
-    expect(auto.tpAuto).toBe(true);
+describe("formReducer – invalid or unreachable CRV returns the same state", () => {
+  // Long 108000/105500: bound 42.2 (exactly at it is unreachable).
+  const badCrvs = [0, -0, -1, Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, 42.2, 50, 1000];
 
-    // Unreachable CRV (e.g. 5 > 7/3): the UI keeps TP and re-sends it to take ownership.
-    const owned = applyInputPatch(auto, { tp: auto.inputs.tp });
-    expect(owned).toEqual({ inputs: auto.inputs, tpAuto: false });
-
-    // In auto mode stop 60 would clear TP (bound 1.5 < 2); in user mode it stays.
-    const stop = applyInputPatch(owned, { stop: "60" });
-    expect(stop.inputs.tp).toBe("700");
-    expect(stop.tpAuto).toBe(false);
-  });
-
-  it("the auto TP would have changed on the same stop edit without the ownership patch", () => {
-    const auto = autoState("long", "100", "70");
-    expect(applyInputPatch(auto, { stop: "60" }).inputs.tp).toBe("");
-  });
-
-  it("unchanged-TP patch keeps TP through later entry/stop/direction edits (long 108000/105500)", () => {
-    const auto = autoState("long", "108000", "105500");
-    expect(auto.inputs.tp).toBe("113373.1");
-    const owned = applyInputPatch(auto, { tp: auto.inputs.tp });
-    expect(owned.tpAuto).toBe(false);
-
-    const later = tpTrace(owned, [
-      { stop: "106000" },
-      { entry: "109000" },
-      { direction: "short" },
-      { stop: "110500" },
-      { direction: "long" },
-      { entry: "" },
-    ]);
-    expect(later.tps).toEqual(["113373.1", "113373.1", "113373.1", "113373.1", "113373.1", "113373.1"]);
-    expect(later.final.tpAuto).toBe(false);
-  });
-
-  it("unchanged empty TP (no reachable CRV yet) also takes ownership and stays empty", () => {
-    // Long 100/60: bound 1.5 < 2, so the auto TP is empty.
-    const auto = autoState("long", "100", "60");
-    expect(auto.inputs.tp).toBe("");
-    const owned = applyInputPatch(auto, { tp: auto.inputs.tp });
-    expect(owned.tpAuto).toBe(false);
-    // Stop 70 would give auto TP 700; in user mode TP stays empty.
-    expect(applyInputPatch(owned, { stop: "70" }).inputs.tp).toBe("");
-  });
-
-  it("a typed reachable CRV sets TP via the text helper and switches to user mode", () => {
-    const auto = autoState("long", "108000", "105500");
-    const result = tpInputForCrvText(auto.inputs, "3");
-    expect(result).toEqual({ tp: "116265.3" });
-    const user = applyInputPatch(auto, result as { tp: string });
-    expect(user.inputs.tp).toBe("116265.3");
-    expect(user.tpAuto).toBe(false);
-    expect(applyInputPatch(user, { stop: "106000" }).inputs.tp).toBe("116265.3");
-  });
-});
-
-describe("applyInputPatch – non-trade fields", () => {
-  for (const patch of NON_TRADE_PATCHES) {
-    const label = JSON.stringify(patch);
-
-    it(`${label} leaves TP and the auto flag alone in auto mode`, () => {
-      const auto = autoState("long", "108000", "105500");
-      const next = applyInputPatch(auto, patch);
-      expect(next.tpAuto).toBe(true);
-      expect(next.inputs).toEqual({ ...auto.inputs, ...patch });
-      expect(next.inputs.tp).toBe("113373.1");
-    });
-
-    it(`${label} does not recompute a TP that differs from CRV 2 in auto mode`, () => {
-      const stale: FormState = {
-        inputs: { ...DEFAULT_INPUTS, entry: "108000", stop: "105500", tp: "999" },
-        tpAuto: true,
-      };
-      const next = applyInputPatch(stale, patch);
-      expect(next.inputs.tp).toBe("999");
-      expect(next.tpAuto).toBe(true);
-    });
-
-    it(`${label} does not fill an empty TP in auto mode`, () => {
-      const empty: FormState = {
-        inputs: { ...DEFAULT_INPUTS, entry: "108000", stop: "105500", tp: "" },
-        tpAuto: true,
-      };
-      expect(applyInputPatch(empty, patch).inputs.tp).toBe("");
-    });
-
-    it(`${label} leaves TP and the user flag alone in user mode`, () => {
-      const user = applyInputPatch(autoState("long", "108000", "105500"), { tp: "115000" });
-      const next = applyInputPatch(user, patch);
-      expect(next.tpAuto).toBe(false);
-      expect(next.inputs).toEqual({ ...user.inputs, ...patch });
+  for (const crv of badCrvs) {
+    it(`CRV ${crv} on long 108000/105500 in CRV and TP mode`, () => {
+      const crvMode = formReducer(trade("long", "108000", "105500"), setCrv(3));
+      expect(formReducer(crvMode, setCrv(crv))).toBe(crvMode);
+      const tpMode = tpModeTrade("long", "108000", "105500", "115000");
+      expect(formReducer(tpMode, setCrv(crv))).toBe(tpMode);
     });
   }
 
-  it("auto mode survives non-trade edits: a later stop change still recomputes", () => {
-    const state = applyAll(autoState("long", "108000", "105500"), NON_TRADE_PATCHES);
-    expect(state.tpAuto).toBe(true);
-    expect(applyInputPatch(state, { stop: "106000" }).inputs.tp).toBe("112235.3");
+  const unusable: { name: string; direction: Direction; entry: string; stop: string }[] = [
+    { name: "empty entry", direction: "long", entry: "", stop: "105500" },
+    { name: "empty stop", direction: "long", entry: "108000", stop: "" },
+    { name: "unparsable stop", direction: "long", entry: "108000", stop: "abc" },
+    { name: "long stop above entry", direction: "long", entry: "108000", stop: "110000" },
+    { name: "long stop at entry", direction: "long", entry: "108000", stop: "108000" },
+    { name: "long stop 0", direction: "long", entry: "108000", stop: "0" },
+    { name: "short stop below entry", direction: "short", entry: "108000", stop: "105500" },
+    // Short 0.1/1: the CRV-2 price 1/28 rounds to 0 on the 0.1 tick.
+    { name: "short off the tick", direction: "short", entry: "0.1", stop: "1" },
+  ];
+
+  for (const { name, direction, entry, stop } of unusable) {
+    it(`${name}: CRV 2 and 3 leave CRV and TP mode untouched`, () => {
+      const crvMode = trade(direction, entry, stop);
+      expect(crvMode.inputs.tp).toBe("");
+      expect(formReducer(crvMode, setCrv(2))).toBe(crvMode);
+      expect(formReducer(crvMode, setCrv(3))).toBe(crvMode);
+      const tpMode = formReducer(crvMode, patch({ tp: "115000" }));
+      expect(formReducer(tpMode, setCrv(2))).toBe(tpMode);
+      expect(formReducer(tpMode, setCrv(3))).toBe(tpMode);
+    });
+  }
+});
+
+describe("formReducer – non-trade fields", () => {
+  for (const fields of NON_TRADE_PATCHES) {
+    const label = JSON.stringify(fields);
+
+    it(`${label} leaves TP and the CRV target alone`, () => {
+      const crv3 = formReducer(trade("long", "108000", "105500"), setCrv(3));
+      expect(formReducer(crv3, patch(fields))).toEqual({
+        inputs: { ...crv3.inputs, ...fields },
+        target: { kind: "crv", crv: 3 },
+      });
+
+      // A stale or empty TP is neither recomputed nor filled.
+      const stale: FormState = {
+        inputs: { ...DEFAULT_INPUTS, entry: "108000", stop: "105500", tp: "999" },
+        target: { kind: "crv", crv: 2 },
+      };
+      expect(formReducer(stale, patch(fields)).inputs.tp).toBe("999");
+      const empty: FormState = { ...stale, inputs: { ...stale.inputs, tp: "" } };
+      expect(formReducer(empty, patch(fields)).inputs.tp).toBe("");
+    });
+
+    it(`${label} leaves TP and the TP target alone`, () => {
+      const user = tpModeTrade("long", "108000", "105500", "115000");
+      expect(formReducer(user, patch(fields))).toEqual({
+        inputs: { ...user.inputs, ...fields },
+        target: { kind: "tp" },
+      });
+    });
+  }
+
+  it("the CRV target survives non-trade edits: a later stop change still recomputes", () => {
+    const state = run(
+      formReducer(trade("long", "108000", "105500"), setCrv(3)),
+      NON_TRADE_PATCHES.map((fields) => patch(fields)),
+    );
+    expect(state.target).toEqual({ kind: "crv", crv: 3 });
+    expect(formReducer(state, patch({ stop: "106000" })).inputs.tp).toBe("114480");
   });
 });
 
-describe("applyInputPatch – merging", () => {
+describe("formReducer – merging and immutability", () => {
   it("only the patched fields change; everything else is kept", () => {
     const base: FormState = {
       inputs: {
@@ -410,35 +497,60 @@ describe("applyInputPatch – merging", () => {
         entry: "108000",
         stop: "105500",
       },
-      tpAuto: true,
+      target: { kind: "crv", crv: 2 },
     };
-    const next = applyInputPatch(base, { stop: "106000" });
+    const next = formReducer(base, patch({ stop: "106000" }));
     expect(next.inputs).toEqual({ ...base.inputs, stop: "106000", tp: "112235.3" });
 
-    const multi = applyInputPatch(next, { balance: "2", leverage: "5" });
+    const multi = formReducer(next, patch({ balance: "2", leverage: "5" }));
     expect(multi.inputs).toEqual({ ...next.inputs, balance: "2", leverage: "5" });
   });
 
   it("an empty patch changes nothing", () => {
-    const auto = autoState("long", "108000", "105500");
-    expect(applyInputPatch(auto, {})).toEqual(auto);
-    const user = applyInputPatch(auto, { tp: "115000" });
-    expect(applyInputPatch(user, {})).toEqual(user);
+    const stale: FormState = {
+      inputs: { ...DEFAULT_INPUTS, entry: "108000", stop: "105500", tp: "999" },
+      target: { kind: "crv", crv: 2 },
+    };
+    expect(formReducer(stale, patch({}))).toEqual(stale);
+    const user = tpModeTrade("long", "108000", "105500", "115000");
+    expect(formReducer(user, patch({}))).toEqual(user);
   });
 
-  it("does not mutate the previous state or INITIAL_FORM_STATE", () => {
+  it("does not mutate the previous state, INITIAL_FORM_STATE or DEFAULT_INPUTS", () => {
     const initialSnapshot = structuredClone(INITIAL_FORM_STATE);
     const defaultsSnapshot = structuredClone(DEFAULT_INPUTS);
-    const auto = autoState("long", "108000", "105500");
-    const autoSnapshot = structuredClone(auto);
+    const actions: FormAction[] = [
+      patch({ entry: "108000" }),
+      patch({ stop: "105500" }),
+      setCrv(3),
+      patch({ direction: "short" }),
+      patch({ tp: "115000" }),
+      patch({ balance: "9" }),
+      setCrv(50),
+      patch({ direction: "long" }),
+      setCrv(2.5),
+      patch({ stop: "106000" }),
+    ];
 
-    const next = applyAll(auto, [{ stop: "106000" }, { tp: "115000" }, { balance: "9" }]);
-    expect(next).not.toBe(auto);
-    expect(auto).toEqual(autoSnapshot);
+    const fromInitial = run(INITIAL_FORM_STATE, actions);
+    expect(fromInitial).not.toBe(INITIAL_FORM_STATE);
     expect(INITIAL_FORM_STATE).toEqual(initialSnapshot);
     expect(DEFAULT_INPUTS).toEqual(defaultsSnapshot);
-    expect(INITIAL_FORM_STATE.inputs.tp).toBe("");
-    expect(INITIAL_FORM_STATE.tpAuto).toBe(true);
+    expect(INITIAL_FORM_STATE).toEqual({ inputs: DEFAULT_INPUTS, target: { kind: "crv", crv: 2 } });
+
+    // Every intermediate state is frozen before the next action: any in-place write throws.
+    let state = deepFreeze(structuredClone(INITIAL_FORM_STATE));
+    for (const action of actions) {
+      const snapshot = structuredClone(state);
+      const next = formReducer(state, action);
+      expect(state).toEqual(snapshot);
+      state = deepFreeze(next);
+    }
+    expect(state).toEqual(fromInitial);
+    expect(state).toEqual({
+      inputs: { ...DEFAULT_INPUTS, entry: "108000", stop: "106000", tp: "113346.5", balance: "9" },
+      target: { kind: "crv", crv: 2.5 },
+    });
   });
 });
 
