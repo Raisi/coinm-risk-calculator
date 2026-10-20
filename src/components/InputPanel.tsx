@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { crvFromPrices, MAX_LEVERAGE, MIN_LEVERAGE, validLossPerUsd } from "@/lib/calc";
 import { FIELD_LABELS, type InputError, type NumericField, type RawInputs } from "@/lib/evaluate";
 import { formatDe, formatDeCompact, parseNumber } from "@/lib/format";
@@ -40,15 +40,17 @@ export function InputPanel({ inputs, targetCrv, errors, onChange, onCrvChange }:
   const crvBase =
     entry !== null && stop !== null && validLossPerUsd(direction, entry, stop) !== null ? { entry, stop } : null;
   const crv = crvBase !== null && tp !== null ? crvFromPrices(direction, crvBase.entry, crvBase.stop, tp) : null;
-  // Accepted CRV shown by the slider and, unless being edited, the field. While the field is focused it
-  // keeps the typed draft instead; the slider never follows a draft.
+  // Accepted CRV shown by the slider and, unless being edited, the field. Once the user edits the focused
+  // field it keeps the typed draft until blur; the slider never follows a draft. Focus alone starts no
+  // draft, so the rounded display text is never validated as if typed.
   const crvShown = formatDe(crv ?? targetCrv ?? DEFAULT_CRV, 2);
+  const crvFieldFocused = useRef(false);
   const [crvDraft, setCrvDraft] = useState<string | null>(null);
   const crvTyped = crvDraft === null ? null : tpInputForCrvText(inputs, crvDraft);
   const crvError = crvTyped !== null && "error" in crvTyped ? (crvTyped.error ?? undefined) : undefined;
   // Slider and field set the CRV target; an invalid or unreachable CRV leaves target and TP unchanged.
   const setCrv = (text: string) => {
-    if (crvDraft !== null) setCrvDraft(text);
+    if (crvFieldFocused.current) setCrvDraft(text);
     const value = parseNumber(text);
     if (value !== null) onCrvChange(value);
   };
@@ -122,8 +124,13 @@ export function InputPanel({ inputs, targetCrv, errors, onChange, onCrvChange }:
           value={crvShown}
           draft={crvDraft}
           onChange={setCrv}
-          onFocus={() => setCrvDraft(crvShown)}
-          onBlur={() => setCrvDraft(null)}
+          onFocus={() => {
+            crvFieldFocused.current = true;
+          }}
+          onBlur={() => {
+            crvFieldFocused.current = false;
+            setCrvDraft(null);
+          }}
           {...CRV_SLIDER}
           unit="R"
           formatValue={(v) => `${formatDe(v, 2)} R`}
