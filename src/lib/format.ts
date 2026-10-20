@@ -59,10 +59,18 @@ export function toCopyValue(value: number, decimals: number): string {
   return `${whole}.${digits.slice(point).padEnd(decimals, "0").slice(0, decimals)}`;
 }
 
+/**
+ * Copy value with trailing zeros dropped ("84707.1", "116265"): dot decimal, no grouping and never
+ * exponential, so `parseNumber` accepts it at any magnitude.
+ */
+export function toPlainDecimal(value: number, decimals: number): string {
+  const copy = toCopyValue(value, decimals);
+  return copy.includes(".") ? copy.replace(/0+$/, "").replace(/\.$/, "") : copy;
+}
+
 /** Copy value for the journal: same truncation, decimal comma, trailing zeros dropped. */
 function copyValueDe(value: number, decimals: number): string {
-  const copy = toCopyValue(value, decimals);
-  return (copy.includes(".") ? copy.replace(/0+$/, "").replace(/\.$/, "") : copy).replace(".", ",");
+  return toPlainDecimal(value, decimals).replace(".", ",");
 }
 
 const deFormatters = new Map<string, Intl.NumberFormat>();

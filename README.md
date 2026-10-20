@@ -3,10 +3,7 @@
 Statische Web-App (Deutsch) zum Dimensionieren einer **Bitunix BTC Coin-M** Position (inverser, BTC-margined
 Kontrakt). Aus Kontostand, Risikobudget, Entry und Stop berechnet sie Positionswert (USD/BTC), Margin beim gewählten
 Hebel und den geschätzten Liquidationspreis – und prüft per Ampel, ob die Liquidation sicher jenseits des Stops liegt.
-
-- Tab **Swing-Rechner** (`/`): Rechner mit Kopierwerten für das Bitunix-Orderpanel, Preisleiste, Warnungen und
-  Journal-Export (TSV).
-- Tab **2x-Strategie** (`/2x/`): Regeln zum Nachschlagen, ohne Berechnung.
+Dazu Kopierwerte für das Bitunix-Orderpanel, Preisleiste, Warnungen und Journal-Export (TSV).
 
 Alles läuft im Browser: kein Backend, keine Exchange-API, keine Schlüssel, keine Netzwerkaufrufe.
 

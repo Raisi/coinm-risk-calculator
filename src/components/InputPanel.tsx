@@ -1,9 +1,9 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
-import { MAX_LEVERAGE, MIN_LEVERAGE } from "@/lib/calc";
+import { crvFromPrices, MAX_LEVERAGE, MIN_LEVERAGE, tpOnTickForCrv, validLossPerUsd } from "@/lib/calc";
 import { FIELD_LABELS, type InputError, type NumericField, type RawInputs } from "@/lib/evaluate";
-import { formatDeCompact, parseNumber } from "@/lib/format";
+import { formatDe, formatDeCompact, parseNumber, toPlainDecimal } from "@/lib/format";
 
 interface InputPanelProps {
   inputs: RawInputs;
@@ -16,12 +16,33 @@ const ASSUMPTION_FIELDS: NumericField[] = ["bufferPct", "mmr", "safetyFactor", "
 /** Drag range of the risk slider in whole percent; finer values like 0,25 are typed. 0 % shows the "> 0" error. */
 const RISK_SLIDER = { min: 0, max: 100, step: 1 } as const;
 
+/** CRV slider range in R; position while TP is empty or invalid. */
+const CRV_SLIDER = { min: 0.5, max: 10, step: 0.1, fallback: 2 } as const;
+
+/** Decimals of the Bitunix BTC price tick (0.1 USD); a TP set by the CRV slider is rounded to it. */
+const TP_DECIMALS = 1;
+
 export function InputPanel({ inputs, errors, onChange }: InputPanelProps) {
   // Missing fields are listed in the status panel; inline messages are for wrong values only.
   const fieldError = (field: NumericField) =>
     errors.find((e) => e.field === field && e.kind !== "missing")?.message;
   const assumptionsInvalid = ASSUMPTION_FIELDS.some((f) => fieldError(f) !== undefined);
   const [assumptionsOpen, setAssumptionsOpen] = useState(false);
+
+  const { direction } = inputs;
+  const entry = parseNumber(inputs.entry);
+  const stop = parseNumber(inputs.stop);
+  const tp = parseNumber(inputs.tp);
+  // Entry/stop the CRV slider works from; `null` disables it. Its position is the CRV of the current TP.
+  const crvBase =
+    entry !== null && stop !== null && validLossPerUsd(direction, entry, stop) !== null ? { entry, stop } : null;
+  const crv = crvBase !== null && tp !== null ? crvFromPrices(direction, crvBase.entry, crvBase.stop, tp) : null;
+  // Dragging the CRV slider writes the TP for that CRV on the price tick; unreachable values are ignored.
+  const setTpFromCrv = (target: number) => {
+    if (crvBase === null) return;
+    const next = tpOnTickForCrv(direction, crvBase.entry, crvBase.stop, target, TP_DECIMALS);
+    if (next !== null) onChange({ tp: toPlainDecimal(next, TP_DECIMALS) });
+  };
 
   const field = (
     name: NumericField,
@@ -86,6 +107,17 @@ export function InputPanel({ inputs, errors, onChange }: InputPanelProps) {
           {field("stop", { unit: "USD" })}
         </div>
         {field("tp", { unit: "USD", optional: true })}
+        <SliderField
+          id="crv"
+          label="CRV (setzt TP)"
+          value={crv}
+          onChange={(value) => setTpFromCrv(Number(value))}
+          {...CRV_SLIDER}
+          formatValue={(v) => `${formatDe(v, 2)} R`}
+          readOnly
+          disabled={crvBase === null}
+          hint={crvBase === null ? "Entry und Stop eingeben" : undefined}
+        />
       </fieldset>
 
       <fieldset className="card group">
@@ -191,24 +223,60 @@ function NumberField({ id, label, value, onChange, unit, hint, optional, error }
 interface SliderFieldProps {
   id: string;
   label: string;
-  value: string;
+  /** Raw typed value, or for a `readOnly` slider the number it shows (`null`: none, slider at `fallback`). */
+  value: string | number | null;
   onChange: (value: string) => void;
   min: number;
   max: number;
   step: number;
-  unit: string;
-  /** Screen-reader text for the slider position. */
+  /** Slider position while `value` is empty or not a number; defaults to `min`. */
+  fallback?: number;
+  /** Unit beside the typed field. */
+  unit?: string;
+  /** Screen-reader text for the slider position; for a `readOnly` slider also the displayed value. */
   formatValue: (value: number) => string;
   /** Whole numbers only: numeric keypad and native number input instead of free decimal text. */
   integer?: boolean;
+  /** Replaces the typed field with a read-only value box; typed input belongs to another field. */
+  readOnly?: boolean;
+  /** Applies to the slider; `hint` is shown below it and describes it. */
+  disabled?: boolean;
+  hint?: string;
   error?: string;
 }
 
-/** Range slider plus a typed field bound to the same raw value; typing outside the range pins the slider. */
-function SliderField({ id, label, value, onChange, min, max, step, unit, formatValue, integer, error }: SliderFieldProps) {
-  const parsed = parseNumber(value);
-  const sliderValue = parsed === null ? min : Math.min(max, Math.max(min, Math.round(parsed / step) * step));
+/**
+ * Range slider plus a typed field bound to the same raw value (or a read-only value box);
+ * values outside the range pin the slider.
+ */
+function SliderField({
+  id,
+  label,
+  value,
+  onChange,
+  min,
+  max,
+  step,
+  fallback = min,
+  unit,
+  formatValue,
+  integer,
+  readOnly,
+  disabled,
+  hint,
+  error,
+}: SliderFieldProps) {
+  const parsed = typeof value === "string" ? parseNumber(value) : value;
+  // Dividing by the inverse step keeps decimal steps exact (14 / 10 = 1.4, but 14 * 0.1 = 1.4000000000000001).
+  // A noisy value would be restored into the range after an ignored change, and Chrome's sanitised
+  // "1.4" would then arrive as a spurious change event.
+  const sliderValue =
+    parsed === null ? fallback : Math.min(max, Math.max(min, Math.round(parsed / step) / (1 / step)));
+  const hintId = hint !== undefined ? `${id}-hint` : undefined;
   const errorId = error !== undefined ? `${id}-error` : undefined;
+  // A read-only slider is the field's only control: it takes the label and announces the real
+  // (unpinned) value. Otherwise the typed field takes the label and carries the real value.
+  const shown = readOnly ? formatValue(parsed ?? fallback) : undefined;
   return (
     <div className="field">
       <label htmlFor={id} className="field__label">
@@ -218,28 +286,42 @@ function SliderField({ id, label, value, onChange, min, max, step, unit, formatV
         <input
           type="range"
           className="slider-field__slider"
+          id={readOnly ? id : undefined}
           min={min}
           max={max}
           step={step}
           value={sliderValue}
           onChange={(e) => onChange(e.target.value)}
-          aria-label={`${label} (Schieberegler)`}
-          aria-valuetext={formatValue(sliderValue)}
+          disabled={disabled}
+          aria-label={readOnly ? undefined : `${label} (Schieberegler)`}
+          aria-valuetext={shown ?? formatValue(sliderValue)}
+          aria-describedby={hintId}
         />
-        <span className="field__control slider-field__number">
-          <input
-            id={id}
-            {...(integer
-              ? { type: "number", inputMode: "numeric", min, max, step }
-              : { type: "text", inputMode: "decimal", autoComplete: "off", spellCheck: false })}
-            value={value}
-            onChange={(e) => onChange(e.target.value)}
-            aria-invalid={error !== undefined}
-            aria-describedby={errorId}
-          />
-          <span className="field__unit">{unit}</span>
-        </span>
+        {readOnly ? (
+          <output htmlFor={id} className="field__control slider-field__number slider-field__value" aria-live="off">
+            {shown}
+          </output>
+        ) : (
+          <span className="field__control slider-field__number">
+            <input
+              id={id}
+              {...(integer
+                ? { type: "number", inputMode: "numeric", min, max, step }
+                : { type: "text", inputMode: "decimal", autoComplete: "off", spellCheck: false })}
+              value={value ?? ""}
+              onChange={(e) => onChange(e.target.value)}
+              aria-invalid={error !== undefined}
+              aria-describedby={errorId}
+            />
+            {unit !== undefined && <span className="field__unit">{unit}</span>}
+          </span>
+        )}
       </div>
+      {hint !== undefined && (
+        <p id={hintId} className="field__hint">
+          {hint}
+        </p>
+      )}
       {error !== undefined && (
         <p id={errorId} className="field__error">
           {error}

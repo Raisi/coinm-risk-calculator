@@ -7,6 +7,7 @@ import {
   formatLocalDateTime,
   parseNumber,
   toCopyValue,
+  toPlainDecimal,
   type JournalRow,
 } from "./format";
 
@@ -183,6 +184,47 @@ describe("toCopyValue (exchange copy values)", () => {
         }
       }
     });
+  });
+});
+
+describe("toPlainDecimal", () => {
+  it.each([
+    [84707.1, 1, "84707.1"],
+    [116265, 1, "116265"],
+    [116265.0, 2, "116265"],
+    [84707.10000000001, 1, "84707.1"],
+    [2.0000000000000003e21, 1, "2000000000000000300000"],
+    [1e21, 0, "1000000000000000000000"],
+    [1e-7, 8, "0.0000001"],
+    [5e-7, 8, "0.0000005"],
+    [1.5e-7, 8, "0.00000015"],
+    [0.0154, 4, "0.0154"],
+    [1e-7, 2, "0"],
+    [0, 1, "0"],
+  ])("%s at %i decimals -> %s", (value, decimals, expected) => {
+    expect(toPlainDecimal(value, decimals)).toBe(expected);
+  });
+
+  it.each([
+    [2.0000000000000003e21, 1],
+    [1e21, 1],
+    [1.7976931348623157e308, 1],
+    [84707.1, 1],
+    [116265, 1],
+    [1e-7, 8],
+    [5e-7, 8],
+    [1.5e-7, 8],
+    [5e-324, 8],
+    [0.1 + 0.2, 1],
+  ])("%s at %i decimals is never exponential and parseNumber accepts it", (value, decimals) => {
+    const text = toPlainDecimal(value, decimals);
+    expect(text).not.toMatch(/e/i);
+    expect(text).not.toMatch(/\.$/);
+    expect(text).not.toMatch(/\.\d*0$/);
+    const parsed = parseNumber(text);
+    expect(parsed).not.toBeNull();
+    expect(parsed!).toBeLessThanOrEqual(value);
+    expect(value - parsed!).toBeLessThan(10 ** -decimals * Math.max(1, value * 1e-15));
   });
 });
 
