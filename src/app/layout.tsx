@@ -14,7 +14,7 @@ const outfit = Outfit({
   variable: "--font-outfit",
 });
 
-const VISUALIZER_URL = "https://raisi.github.io/blockchain-info-helpers/";
+const KNOWLEDGE_HUB_URL = "https://raisi.github.io/blockchain-info-helpers/";
 
 export const metadata: Metadata = {
   title: "Coin-M Positionsrechner",
@@ -44,8 +44,8 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
               <Link href="/" className="site-nav__link" aria-current="true">
                 Rechner
               </Link>
-              <a href={VISUALIZER_URL} className="site-nav__link">
-                Visualizer
+              <a href={KNOWLEDGE_HUB_URL} className="site-nav__link">
+                Blockchain Knowledge Hub
                 <Icon name="arrowUpRight" size={12} />
               </a>
             </nav>
