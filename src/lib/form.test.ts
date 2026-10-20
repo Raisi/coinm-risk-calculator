@@ -5,8 +5,6 @@ import {
   applyInputPatch,
   crvUnreachableText,
   INITIAL_FORM_STATE,
-  TEXT_CRV_INVALID,
-  TEXT_CRV_OFF_TICK,
   tpInputForCrv,
   tpInputForCrvText,
   type CrvTextResult,
@@ -532,8 +530,7 @@ describe("tpInputForCrvText", () => {
   const short = { direction: "short" as const, entry: "108000", stop: "110500" };
   const INVALID = "CRV muss größer als 0 sein.";
 
-  it("exposes the spec error texts", () => {
-    expect(TEXT_CRV_INVALID).toBe(INVALID);
+  it("formats the unreachable error text", () => {
     expect(crvUnreachableText(42.2)).toBe("CRV nicht erreichbar – max. 42,20 R bei diesem Stop.");
     expect(crvUnreachableText(70 / 30)).toBe("CRV nicht erreichbar – max. 2,33 R bei diesem Stop.");
     expect(crvUnreachableText(1000)).toBe("CRV nicht erreichbar – max. 1.000,00 R bei diesem Stop.");
@@ -641,11 +638,8 @@ describe("tpInputForCrvText", () => {
     // exact 0.0357… (= 1 / 28): rounds to 0, not a positive price
     { inputs: { direction: "short" as const, entry: "0.1", stop: "1" }, text: "2" },
   ])("$inputs.direction $inputs.entry/$inputs.stop $text: no TP on the 0.1 tick", ({ inputs, text }) => {
-    expect(tpInputForCrvText(inputs, text)).toEqual({ error: TEXT_CRV_OFF_TICK });
-  });
-
-  it("the off-tick error is a distinct, non-empty message", () => {
-    expect(TEXT_CRV_OFF_TICK).not.toBe("");
-    expect(TEXT_CRV_OFF_TICK).not.toBe(INVALID);
+    expect(tpInputForCrvText(inputs, text)).toEqual({
+      error: "CRV nicht erreichbar – kein TP-Preis auf dem 0,1-USD-Tick.",
+    });
   });
 });
