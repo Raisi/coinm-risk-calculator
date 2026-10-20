@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { Icon } from "./Icon";
 
 type CopyState = "idle" | "copied" | "failed";
 
@@ -38,6 +39,7 @@ interface CopyButtonProps {
   /** What is copied, for screen readers, e.g. "Positionswert USD". */
   subject: string;
   label?: string;
+  /** Visual variant: `copy__button--primary` (filled cyan) or `copy__button--outline`. */
   className?: string;
 }
 
@@ -65,6 +67,7 @@ export function CopyButton({ value, subject, label = "Kopieren", className }: Co
         onClick={copy}
         aria-label={state === "idle" ? `${subject} kopieren` : undefined}
       >
+        <Icon name={state === "copied" ? "check" : "copy"} size={14} />
         {text}
       </button>
       <span role="status" className="sr-only">

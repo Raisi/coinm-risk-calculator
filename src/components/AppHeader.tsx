@@ -9,23 +9,35 @@ export type TabId = (typeof TABS)[number]["id"];
 
 export function AppHeader({ active }: { active: TabId }) {
   return (
-    <header className="masthead">
-      <div className="masthead__brand">
-        <p className="masthead__eyebrow">Bitunix · BTC Coin-M · inverse Kontrakte</p>
-        <h1 className="masthead__title">Coin-M Positionsrechner</h1>
+    <header className="hero">
+      <p className="hero__crumb">
+        <span>Bitunix</span>
+        <span aria-hidden="true">/</span>
+        <span className="hero__crumb-accent">BTC Coin-M · invers</span>
+      </p>
+      <div className="hero__row">
+        <div>
+          <h1 className="hero__title">
+            Coin-M <span className="hero__accent">Positionsrechner</span>
+          </h1>
+          <p className="hero__lead">
+            Positionsgröße, Margin und Liquidation für inverse BTC-Kontrakte – mit Kopierwerten direkt fürs
+            Bitunix-Orderpanel.
+          </p>
+        </div>
+        <nav className="mode-tabs" aria-label="Rechner-Modus">
+          {TABS.map((tab) => (
+            <Link
+              key={tab.id}
+              href={tab.href}
+              className="mode-tabs__link"
+              aria-current={tab.id === active ? "page" : undefined}
+            >
+              {tab.label}
+            </Link>
+          ))}
+        </nav>
       </div>
-      <nav className="tabs" aria-label="Bereiche">
-        {TABS.map((tab) => (
-          <Link
-            key={tab.id}
-            href={tab.href}
-            className="tabs__link"
-            aria-current={tab.id === active ? "page" : undefined}
-          >
-            {tab.label}
-          </Link>
-        ))}
-      </nav>
     </header>
   );
 }

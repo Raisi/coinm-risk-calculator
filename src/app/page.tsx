@@ -4,15 +4,13 @@ import { BitunixSettings, Hints } from "@/components/Guidance";
 
 export default function SwingPage() {
   return (
-    <>
+    <main className="container page">
       <AppHeader active="swing" />
-      <main className="page">
-        <Calculator />
-        <div className="guides">
-          <Hints />
-          <BitunixSettings />
-        </div>
-      </main>
-    </>
+      <Calculator />
+      <div className="guides">
+        <Hints />
+        <BitunixSettings />
+      </div>
+    </main>
   );
 }

@@ -1,5 +1,6 @@
 import { TEXT_SHORT_LIQ_NOTE, type Evaluation, type LiqCheck } from "@/lib/evaluate";
 import { COPY_DECIMALS, formatDe, toCopyValue } from "@/lib/format";
+import { CopyButton } from "./CopyButton";
 import { JournalExport } from "./JournalExport";
 import { PriceRail } from "./PriceRail";
 import { ResultRow } from "./ResultRow";
@@ -10,17 +11,47 @@ const pct = (value: number) => `${formatDe(value, 2)} %`;
 const price = (value: number) => (Number.isFinite(value) ? `${formatDe(value, 1)} USD` : "keine Liquidation");
 const factor = (value: number) => (Number.isFinite(value) ? `${formatDe(value, 2)}×` : "∞");
 
-function LiqRows({ check, label, hint }: { check: LiqCheck; label: string; hint: string }) {
+/** "Liq-Abstand x % · Faktor y×" with the factor in its traffic-light colour. */
+function LiqSummary({ check }: { check: LiqCheck }) {
+  if (check.distancePct === null) return <>Keine Liquidation</>;
   return (
     <>
-      <ResultRow label={label} hint={hint} value={price(check.price)} />
-      <ResultRow label="Liq-Abstand" value={check.distancePct === null ? "–" : pct(check.distancePct)} />
-      <ResultRow
-        label="Faktor"
-        hint="Liq-Abstand ÷ Stop-Abstand"
-        value={<span data-status={check.status}>{factor(check.factor)}</span>}
-      />
+      Liq-Abstand {pct(check.distancePct)} · Faktor{" "}
+      <span className="factor" data-status={check.status}>
+        {factor(check.factor)}
+      </span>
     </>
+  );
+}
+
+interface CopyColumnProps {
+  /** Bitunix Futures Unit Setting the value belongs to. */
+  setting: string;
+  label: string;
+  /** Exact de-DE value with unit, shown under the copy value. */
+  exact: string;
+  copyValue: string;
+  recommended?: boolean;
+}
+
+function CopyColumn({ setting, label, exact, copyValue, recommended }: CopyColumnProps) {
+  return (
+    <div className={recommended ? "copy-col copy-col--recommended" : "copy-col"}>
+      <dt className="copy-col__head">
+        <span className="copy-col__setting">
+          {setting}
+          {recommended && " · empfohlen"}
+        </span>
+        <span className="copy-col__label">{label}</span>
+      </dt>
+      <dd className="copy-col__body">
+        <code className="copy-col__value" title="Kopierwert">
+          {copyValue}
+        </code>
+        <span className="copy-col__exact">{exact}</span>
+        <CopyButton value={copyValue} subject={label} className={recommended ? "copy__button--primary" : undefined} />
+      </dd>
+    </div>
   );
 }
 
@@ -28,84 +59,104 @@ export function Results({ evaluation: e }: { evaluation: Evaluation }) {
   const { direction, entry, stop, tp, leverage } = e.inputs;
   return (
     <div className="results">
-      <section className="panel panel--rail" aria-labelledby="rail-title">
-        <h2 id="rail-title" className="section-title">
-          Preisleiste
-        </h2>
+      <section className="card rail-card" aria-labelledby="rail-title">
+        <div className="card__head">
+          <h2 id="rail-title" className="section-title">
+            Preisleiste
+          </h2>
+          {e.crv !== null && <span className="card__meta">CRV {formatDe(e.crv, 2)} R</span>}
+        </div>
         <PriceRail entry={entry} stop={stop} tp={tp} liq={e.liq} panelLiq={e.panelLiq} />
+        <p className="rail-caption">
+          <LiqSummary check={e.liq} />
+        </p>
+        {e.panelLiq !== null && (
+          <p className="rail-caption">
+            Bitunix-Panel: <LiqSummary check={e.panelLiq} />
+          </p>
+        )}
       </section>
 
-      <section className="panel panel--copy" aria-labelledby="copy-title">
-        <h2 id="copy-title" className="section-title">
-          Für Bitunix
-        </h2>
-        <dl className="results__list">
-          <ResultRow
+      <section className="card bitunix" aria-labelledby="copy-title">
+        <div className="bitunix__head">
+          <h2 id="copy-title" className="section-title">
+            Für Bitunix
+          </h2>
+          <p className="bitunix__note">Kopierwerte abgerundet, Punkt als Dezimalzeichen</p>
+        </div>
+        <dl className="bitunix__grid">
+          <CopyColumn
+            setting="By Qty – USD"
             label="Positionswert USD"
-            hint="By Qty – USD"
-            value={usd(e.positionUsd)}
+            exact={usd(e.positionUsd)}
             copyValue={toCopyValue(e.positionUsd, COPY_DECIMALS.positionUsd)}
           />
-          <ResultRow
+          <CopyColumn
+            setting="By Position Size – BTC"
             label="Positionswert BTC"
-            hint="By Position Size – BTC"
-            value={btc(e.positionBtc)}
+            exact={btc(e.positionBtc)}
             copyValue={toCopyValue(e.positionBtc, COPY_DECIMALS.positionBtc)}
+            recommended
           />
-          <ResultRow
-            label={`Margin bei ${leverage}x`}
-            hint="By Cost – BTC"
-            value={btc(e.marginBtc)}
+          <CopyColumn
+            setting="By Cost – BTC"
+            label={`Margin bei ${leverage}×`}
+            exact={btc(e.marginBtc)}
             copyValue={toCopyValue(e.marginBtc, COPY_DECIMALS.marginBtc)}
           />
         </dl>
-        <p className="panel__note">Kopierwerte sind abgerundet, mit Punkt als Dezimalzeichen.</p>
       </section>
 
-      <div className="results__grid">
-        <section className="panel" aria-labelledby="risk-title">
-          <h2 id="risk-title" className="section-title">
+      <dl className="kpis">
+        <div className="card kpi">
+          <dt className="kpi__label">Risiko effektiv</dt>
+          <dd className="kpi__value">{pct(e.riskPctEffective)}</dd>
+          <dd className="kpi__sub">Limit {btc(e.riskLimitBtc)}</dd>
+        </div>
+        <div className="card kpi">
+          <dt className="kpi__label">Stop-Abstand</dt>
+          <dd className="kpi__value kpi__value--risk">{pct(e.stopDistancePct)}</dd>
+          <dd className="kpi__sub">vom Entry</dd>
+        </div>
+        <div className="card kpi">
+          <dt className="kpi__label">Liq-Faktor</dt>
+          <dd className="kpi__value factor" data-status={e.liq.status}>
+            {factor(e.liq.factor)}
+          </dd>
+          <dd className="kpi__sub">Liq-Abstand ÷ Stop-Abstand</dd>
+        </div>
+        <div className="card kpi">
+          <dt className="kpi__label">CRV</dt>
+          <dd className="kpi__value kpi__value--accent">{e.crv === null ? "–" : `${formatDe(e.crv, 2)} R`}</dd>
+          <dd className="kpi__sub">{e.gainBtc === null ? "ohne TP" : `Gewinn ${btc(e.gainBtc)}`}</dd>
+        </div>
+      </dl>
+
+      <div className="details">
+        <section className="card" aria-labelledby="risk-title">
+          <h2 id="risk-title" className="section-title details__title">
             Risiko
           </h2>
-          <dl className="results__list">
+          <dl>
             <ResultRow label="Risiko BTC netto" hint="Basis der Positionsgröße" value={btc(e.riskBtc)} />
             <ResultRow label="Risiko BTC brutto" hint="inkl. Gebühren/Slippage" value={btc(e.grossRiskBtc)} />
-            <ResultRow label="Risiko % effektiv" hint={`Limit ${btc(e.riskLimitBtc)}`} value={pct(e.riskPctEffective)} />
-            <ResultRow label="Stop-Abstand" value={pct(e.stopDistancePct)} />
+            <ResultRow label="Gewinn bei TP" value={e.gainBtc === null ? "–" : btc(e.gainBtc)} />
           </dl>
         </section>
 
-        <section className="panel" aria-labelledby="liq-title">
-          <h2 id="liq-title" className="section-title">
-            Liquidation
+        <section className="card" aria-labelledby="liq-title">
+          <h2 id="liq-title" className="section-title details__title">
+            Liquidation &amp; Kontrolle
           </h2>
-          <dl className="results__list">
-            <LiqRows
-              check={e.liq}
+          <dl>
+            <ResultRow
               label="Liquidationspreis"
               hint={direction === "short" ? TEXT_SHORT_LIQ_NOTE : "Näherung für Isolated-Margin"}
+              value={price(e.liq.price)}
             />
             {e.panelLiq !== null && (
-              <LiqRows check={e.panelLiq} label="Liq laut Bitunix-Panel" hint="maßgeblich" />
+              <ResultRow label="Liq laut Bitunix-Panel" hint="maßgeblich" value={price(e.panelLiq.price)} />
             )}
-          </dl>
-        </section>
-
-        <section className="panel" aria-labelledby="target-title">
-          <h2 id="target-title" className="section-title">
-            Ziel
-          </h2>
-          <dl className="results__list">
-            <ResultRow label="Gewinn bei TP" value={e.gainBtc === null ? "–" : btc(e.gainBtc)} />
-            <ResultRow label="CRV" value={e.crv === null ? "–" : `${formatDe(e.crv, 2)} R`} />
-          </dl>
-        </section>
-
-        <section className="panel" aria-labelledby="check-title">
-          <h2 id="check-title" className="section-title">
-            Kontrolle
-          </h2>
-          <dl className="results__list">
             <ResultRow
               label="Effektiver Hebel aufs Konto"
               hint="Positionswert BTC ÷ Kontostand"

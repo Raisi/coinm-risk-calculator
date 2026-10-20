@@ -23,7 +23,10 @@ export function InputPanel({ inputs, errors, onChange }: InputPanelProps) {
   const assumptionsInvalid = ASSUMPTION_FIELDS.some((f) => fieldError(f) !== undefined);
   const [assumptionsOpen, setAssumptionsOpen] = useState(false);
 
-  const field = (name: NumericField, extra: Partial<Pick<NumberFieldProps, "label" | "unit" | "hint">> = {}) => (
+  const field = (
+    name: NumericField,
+    extra: Partial<Pick<NumberFieldProps, "label" | "unit" | "hint" | "optional">> = {},
+  ) => (
     <NumberField
       id={name}
       label={FIELD_LABELS[name]}
@@ -36,8 +39,8 @@ export function InputPanel({ inputs, errors, onChange }: InputPanelProps) {
 
   return (
     <form className="inputs" onSubmit={(e) => e.preventDefault()} noValidate aria-label="Eingaben">
-      <fieldset className="group">
-        <legend className="group__title">Konto &amp; Risiko</legend>
+      <fieldset className="card group">
+        <GroupTitle number="01">Konto &amp; Risiko</GroupTitle>
         {field("balance", { unit: "BTC" })}
         <Segmented
           name="riskMode"
@@ -66,15 +69,15 @@ export function InputPanel({ inputs, errors, onChange }: InputPanelProps) {
         {field("riskLimitPct", { unit: "%", hint: "Kursvorgabe: max. 5–10 % pro Trade" })}
       </fieldset>
 
-      <fieldset className="group">
-        <legend className="group__title">Trade</legend>
+      <fieldset className="card group">
+        <GroupTitle number="02">Trade</GroupTitle>
         <Segmented
           name="direction"
           legend="Richtung"
           value={inputs.direction}
           options={[
-            { value: "long", label: "Long" },
-            { value: "short", label: "Short" },
+            { value: "long", label: "Long", marker: "▲" },
+            { value: "short", label: "Short", marker: "▼" },
           ]}
           onChange={(direction) => onChange({ direction })}
         />
@@ -82,11 +85,11 @@ export function InputPanel({ inputs, errors, onChange }: InputPanelProps) {
           {field("entry", { unit: "USD" })}
           {field("stop", { unit: "USD" })}
         </div>
-        {field("tp", { unit: "USD", hint: "optional" })}
+        {field("tp", { unit: "USD", optional: true })}
       </fieldset>
 
-      <fieldset className="group">
-        <legend className="group__title">Hebel &amp; Liquidation</legend>
+      <fieldset className="card group">
+        <GroupTitle number="03">Hebel &amp; Liquidation</GroupTitle>
         <SliderField
           id="leverage"
           label={FIELD_LABELS.leverage}
@@ -96,23 +99,24 @@ export function InputPanel({ inputs, errors, onChange }: InputPanelProps) {
           max={MAX_LEVERAGE}
           step={1}
           integer
-          unit="x"
+          unit="×"
           formatValue={(v) => `${v}x`}
           error={fieldError("leverage")}
         />
         {field("panelLiq", {
           unit: "USD",
-          hint: "optional – aus dem Bitunix-Orderpanel; maßgeblich vor der Berechnung",
+          optional: true,
+          hint: "Aus dem Bitunix-Orderpanel – wenn gesetzt, maßgeblich vor der Berechnung.",
         })}
       </fieldset>
 
       <details
-        className="group group--details"
+        className="assumptions"
         open={assumptionsOpen || assumptionsInvalid}
         onToggle={(e) => setAssumptionsOpen(e.currentTarget.open)}
       >
-        <summary className="group__title">Annahmen &amp; Schwellen</summary>
-        <div className="group__body">
+        <summary>Annahmen &amp; Schwellen</summary>
+        <div className="assumptions__body">
           {field("bufferPct", { unit: "%", hint: "wird vom Risiko abgezogen, bevor die Größe berechnet wird" })}
           {field("mmr", { label: "Maintenance-Margin-Rate m", hint: "0,004 = 0,4 %" })}
           {field("safetyFactor", { unit: "×", hint: "Liq-Abstand in Vielfachen des Stop-Abstands" })}
@@ -123,6 +127,18 @@ export function InputPanel({ inputs, errors, onChange }: InputPanelProps) {
   );
 }
 
+/** Numbered card legend, e.g. "01 Konto & Risiko"; the number is decoration. */
+function GroupTitle({ number, children }: { number: string; children: ReactNode }) {
+  return (
+    <legend className="section-title">
+      <span className="section-title__num" aria-hidden="true">
+        {number}
+      </span>
+      {children}
+    </legend>
+  );
+}
+
 interface NumberFieldProps {
   id: string;
   label: string;
@@ -130,16 +146,19 @@ interface NumberFieldProps {
   onChange: (value: string) => void;
   unit?: string;
   hint?: ReactNode;
+  /** Marks the label "· optional". */
+  optional?: boolean;
   error?: string;
 }
 
-function NumberField({ id, label, value, onChange, unit, hint, error }: NumberFieldProps) {
+function NumberField({ id, label, value, onChange, unit, hint, optional, error }: NumberFieldProps) {
   const hintId = hint !== undefined ? `${id}-hint` : undefined;
   const errorId = error !== undefined ? `${id}-error` : undefined;
   return (
     <div className="field">
       <label htmlFor={id} className="field__label">
         {label}
+        {optional && <span className="field__optional"> · optional</span>}
       </label>
       <span className="field__control">
         <input
@@ -191,11 +210,11 @@ function SliderField({ id, label, value, onChange, min, max, step, unit, formatV
   const sliderValue = parsed === null ? min : Math.min(max, Math.max(min, Math.round(parsed / step) * step));
   const errorId = error !== undefined ? `${id}-error` : undefined;
   return (
-    <div className="slider-field">
+    <div className="field">
       <label htmlFor={id} className="field__label">
         {label}
       </label>
-      <div className="slider-field__controls">
+      <div className="slider-field">
         <input
           type="range"
           className="slider-field__slider"
@@ -234,7 +253,8 @@ interface SegmentedProps<T extends string> {
   name: string;
   legend: string;
   value: T;
-  options: { value: T; label: string }[];
+  /** `marker` is a decorative glyph before the label; options with a marker get their own active colour. */
+  options: { value: T; label: string; marker?: string }[];
   onChange: (value: T) => void;
 }
 
@@ -244,7 +264,11 @@ function Segmented<T extends string>({ name, legend, value, options, onChange }:
       <legend className="field__label">{legend}</legend>
       <div className="segmented__options">
         {options.map((option) => (
-          <label key={option.value} className="segmented__option">
+          <label
+            key={option.value}
+            className="segmented__option"
+            data-tone={option.marker !== undefined ? option.value : undefined}
+          >
             <input
               type="radio"
               name={name}
@@ -252,7 +276,10 @@ function Segmented<T extends string>({ name, legend, value, options, onChange }:
               checked={value === option.value}
               onChange={() => onChange(option.value)}
             />
-            <span>{option.label}</span>
+            <span>
+              {option.marker !== undefined && <span aria-hidden="true">{option.marker}</span>}
+              {option.label}
+            </span>
           </label>
         ))}
       </div>

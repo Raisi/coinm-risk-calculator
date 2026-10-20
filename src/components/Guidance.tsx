@@ -1,15 +1,18 @@
 export function Hints() {
   return (
     <section className="guide" aria-labelledby="hints-title">
-      <h2 id="hints-title" className="section-title">
-        Hinweise
-      </h2>
-      <ul className="guide__list">
+      <div className="guide__head">
+        <h2 id="hints-title" className="section-title">
+          Hinweise
+        </h2>
+        <span className="guide__meta">Vor der Order</span>
+      </div>
+      <ol className="numbered">
         <li>Futures Unit Setting auf „By Position Size – BTC“ stellen.</li>
         <li>Stop-Trigger auf Mark Price oder Last Price prüfen.</li>
         <li>Limit-Orders mit GTC können später gefüllt werden – Setup vor dem Fill erneut prüfen.</li>
         <li>Formeln sind Näherungen für Isolated-Margin, Bitunix-Panel ist maßgeblich.</li>
-      </ul>
+      </ol>
     </section>
   );
 }
@@ -17,12 +20,15 @@ export function Hints() {
 export function BitunixSettings() {
   return (
     <section className="guide" aria-labelledby="bitunix-title">
-      <h2 id="bitunix-title" className="section-title">
-        Bitunix-Einstellungen
-      </h2>
+      <div className="guide__head">
+        <h2 id="bitunix-title" className="section-title">
+          Bitunix-Einstellungen
+        </h2>
+        <span className="guide__meta">Futures Unit Setting</span>
+      </div>
       <div className="table-scroll" tabIndex={0} role="region" aria-label="Futures Unit Settings">
         <table className="units">
-          <caption>Futures Unit Setting – was die Eingabe im Orderpanel bedeutet</caption>
+          <caption className="sr-only">Futures Unit Setting – was die Eingabe im Orderpanel bedeutet</caption>
           <thead>
             <tr>
               <th scope="col">Einstellung</th>
@@ -41,20 +47,22 @@ export function BitunixSettings() {
               <td>eingesetzte Margin in BTC beim gewählten Hebel</td>
               <td>Margin BTC</td>
             </tr>
-            <tr>
+            <tr className="units__recommended">
               <th scope="row">By Position Size – BTC</th>
-              <td>Positionsgröße in BTC – empfohlene Einstellung</td>
+              <td>
+                Positionsgröße in BTC – <span className="units__emph">empfohlene Einstellung</span>
+              </td>
               <td>Positionswert BTC</td>
             </tr>
           </tbody>
         </table>
       </div>
-      <dl className="guide__facts">
-        <div>
+      <dl className="facts">
+        <div className="card">
           <dt>Margin-Modus</dt>
           <dd>Isolated – nur die Margin dieser Position ist im Risiko; die Liquidationsformeln gelten nur dafür.</dd>
         </div>
-        <div>
+        <div className="card">
           <dt>Multi-Trade</dt>
           <dd>
             Aus: weitere Orders in dieselbe Richtung werden zu einer Position mit Durchschnittspreis zusammengefasst –

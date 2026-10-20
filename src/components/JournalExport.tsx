@@ -10,22 +10,24 @@ export function JournalExport({ evaluation }: { evaluation: Evaluation }) {
   const [previewTime] = useState(() => new Date());
 
   return (
-    <section className="journal" aria-labelledby="journal-title">
+    <section className="card journal" aria-labelledby="journal-title">
       <div className="journal__head">
-        <h2 id="journal-title" className="section-title">
-          Journal
-        </h2>
+        <div className="journal__intro">
+          <h2 id="journal-title" className="section-title">
+            Journal
+          </h2>
+          <p className="journal__note">
+            Tab-getrennte Kopf- und Datenzeile für Excel, Numbers oder Google Sheets. Datum/Zeit ist der Zeitpunkt des
+            Kopierens.
+          </p>
+        </div>
         <CopyButton
           value={() => buildJournalTsv(row, new Date())}
           subject="Journal-Zeile"
           label="Journal-Zeile kopieren"
-          className="copy__button--wide"
+          className="copy__button--outline"
         />
       </div>
-      <p className="journal__note">
-        Kopfzeile und eine Datenzeile, tabulatorgetrennt – direkt in Excel, Numbers oder Google Sheets einfügen.
-        Datum/Zeit ist der Zeitpunkt des Kopierens.
-      </p>
       <details className="journal__preview">
         <summary>Vorschau</summary>
         <pre tabIndex={0}>{buildJournalTsv(row, previewTime)}</pre>
