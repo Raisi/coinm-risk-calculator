@@ -3,7 +3,7 @@
 import { useState, type ReactNode } from "react";
 import { MAX_LEVERAGE, MIN_LEVERAGE } from "@/lib/calc";
 import { FIELD_LABELS, type InputError, type NumericField, type RawInputs } from "@/lib/evaluate";
-import { parseNumber } from "@/lib/format";
+import { formatDeCompact, parseNumber } from "@/lib/format";
 
 interface InputPanelProps {
   inputs: RawInputs;
@@ -12,6 +12,9 @@ interface InputPanelProps {
 }
 
 const ASSUMPTION_FIELDS: NumericField[] = ["bufferPct", "mmr", "safetyFactor", "nearFactor"];
+
+/** Drag range of the risk slider; larger values can still be typed (the limit warning covers them). */
+const RISK_SLIDER = { min: 0.25, max: 10, step: 0.25 } as const;
 
 export function InputPanel({ inputs, errors, onChange }: InputPanelProps) {
   // Missing fields are listed in the status panel; inline messages are for wrong values only.
@@ -31,10 +34,6 @@ export function InputPanel({ inputs, errors, onChange }: InputPanelProps) {
     />
   );
 
-  const parsedLeverage = parseNumber(inputs.leverage);
-  const sliderLeverage =
-    parsedLeverage === null ? MIN_LEVERAGE : Math.min(MAX_LEVERAGE, Math.max(MIN_LEVERAGE, Math.round(parsedLeverage)));
-
   return (
     <form className="inputs" onSubmit={(e) => e.preventDefault()} noValidate aria-label="Eingaben">
       <fieldset className="group">
@@ -50,7 +49,20 @@ export function InputPanel({ inputs, errors, onChange }: InputPanelProps) {
           ]}
           onChange={(riskMode) => onChange({ riskMode })}
         />
-        {inputs.riskMode === "pct" ? field("riskPct", { unit: "%" }) : field("riskBtc", { unit: "BTC" })}
+        {inputs.riskMode === "pct" ? (
+          <SliderField
+            id="riskPct"
+            label={FIELD_LABELS.riskPct}
+            value={inputs.riskPct}
+            onChange={(riskPct) => onChange({ riskPct })}
+            {...RISK_SLIDER}
+            unit="%"
+            formatValue={(v) => `${formatDeCompact(v, 2)} %`}
+            error={fieldError("riskPct")}
+          />
+        ) : (
+          field("riskBtc", { unit: "BTC" })
+        )}
         {field("riskLimitPct", { unit: "%", hint: "Kursvorgabe: max. 5–10 % pro Trade" })}
       </fieldset>
 
@@ -75,44 +87,19 @@ export function InputPanel({ inputs, errors, onChange }: InputPanelProps) {
 
       <fieldset className="group">
         <legend className="group__title">Hebel &amp; Liquidation</legend>
-        <div className="leverage">
-          <label htmlFor="leverage" className="field__label">
-            {FIELD_LABELS.leverage}
-          </label>
-          <div className="leverage__controls">
-            <input
-              type="range"
-              className="leverage__slider"
-              min={MIN_LEVERAGE}
-              max={MAX_LEVERAGE}
-              step={1}
-              value={sliderLeverage}
-              onChange={(e) => onChange({ leverage: e.target.value })}
-              aria-label={`${FIELD_LABELS.leverage} (Schieberegler)`}
-              aria-valuetext={`${sliderLeverage}x`}
-            />
-            <span className="field__control leverage__number">
-              <input
-                id="leverage"
-                type="number"
-                inputMode="numeric"
-                min={MIN_LEVERAGE}
-                max={MAX_LEVERAGE}
-                step={1}
-                value={inputs.leverage}
-                onChange={(e) => onChange({ leverage: e.target.value })}
-                aria-invalid={fieldError("leverage") !== undefined}
-                aria-describedby={fieldError("leverage") !== undefined ? "leverage-error" : undefined}
-              />
-              <span className="field__unit">x</span>
-            </span>
-          </div>
-          {fieldError("leverage") !== undefined && (
-            <p id="leverage-error" className="field__error">
-              {fieldError("leverage")}
-            </p>
-          )}
-        </div>
+        <SliderField
+          id="leverage"
+          label={FIELD_LABELS.leverage}
+          value={inputs.leverage}
+          onChange={(leverage) => onChange({ leverage })}
+          min={MIN_LEVERAGE}
+          max={MAX_LEVERAGE}
+          step={1}
+          integer
+          unit="x"
+          formatValue={(v) => `${v}x`}
+          error={fieldError("leverage")}
+        />
         {field("panelLiq", {
           unit: "USD",
           hint: "optional – aus dem Bitunix-Orderpanel; maßgeblich vor der Berechnung",
@@ -173,6 +160,67 @@ function NumberField({ id, label, value, onChange, unit, hint, error }: NumberFi
           {hint}
         </p>
       )}
+      {error !== undefined && (
+        <p id={errorId} className="field__error">
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
+interface SliderFieldProps {
+  id: string;
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  min: number;
+  max: number;
+  step: number;
+  unit: string;
+  /** Screen-reader text for the slider position. */
+  formatValue: (value: number) => string;
+  /** Whole numbers only: numeric keypad and native number input instead of free decimal text. */
+  integer?: boolean;
+  error?: string;
+}
+
+/** Range slider plus a typed field bound to the same raw value; typing outside the range pins the slider. */
+function SliderField({ id, label, value, onChange, min, max, step, unit, formatValue, integer, error }: SliderFieldProps) {
+  const parsed = parseNumber(value);
+  const sliderValue = parsed === null ? min : Math.min(max, Math.max(min, Math.round(parsed / step) * step));
+  const errorId = error !== undefined ? `${id}-error` : undefined;
+  return (
+    <div className="slider-field">
+      <label htmlFor={id} className="field__label">
+        {label}
+      </label>
+      <div className="slider-field__controls">
+        <input
+          type="range"
+          className="slider-field__slider"
+          min={min}
+          max={max}
+          step={step}
+          value={sliderValue}
+          onChange={(e) => onChange(e.target.value)}
+          aria-label={`${label} (Schieberegler)`}
+          aria-valuetext={formatValue(sliderValue)}
+        />
+        <span className="field__control slider-field__number">
+          <input
+            id={id}
+            {...(integer
+              ? { type: "number", inputMode: "numeric", min, max, step }
+              : { type: "text", inputMode: "decimal", autoComplete: "off", spellCheck: false })}
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            aria-invalid={error !== undefined}
+            aria-describedby={errorId}
+          />
+          <span className="field__unit">{unit}</span>
+        </span>
+      </div>
       {error !== undefined && (
         <p id={errorId} className="field__error">
           {error}

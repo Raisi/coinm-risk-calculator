@@ -387,27 +387,27 @@ textarea {
   outline-offset: 2px;
 }
 
-.leverage {
+.slider-field {
   display: flex;
   flex-direction: column;
   gap: var(--space-3xs);
 }
 
-.leverage__controls {
+.slider-field__controls {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 6.5rem;
   align-items: center;
   gap: var(--space-sm);
 }
 
-.leverage__slider {
+.slider-field__slider {
   width: 100%;
   height: var(--control-height);
   accent-color: var(--ink);
   cursor: pointer;
 }
 
-.leverage__number input {
+.slider-field__number input {
   padding-right: 2rem;
 }
 
