@@ -1,9 +1,10 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
-import { crvFromPrices, MAX_LEVERAGE, MIN_LEVERAGE, tpOnTickForCrv, validLossPerUsd } from "@/lib/calc";
+import { crvFromPrices, MAX_LEVERAGE, MIN_LEVERAGE, validLossPerUsd } from "@/lib/calc";
 import { FIELD_LABELS, type InputError, type NumericField, type RawInputs } from "@/lib/evaluate";
-import { formatDe, formatDeCompact, parseNumber, toPlainDecimal } from "@/lib/format";
+import { formatDe, formatDeCompact, parseNumber } from "@/lib/format";
+import { DEFAULT_CRV, tpInputForCrv } from "@/lib/form";
 
 interface InputPanelProps {
   inputs: RawInputs;
@@ -17,10 +18,7 @@ const ASSUMPTION_FIELDS: NumericField[] = ["bufferPct", "mmr", "safetyFactor", "
 const RISK_SLIDER = { min: 0, max: 100, step: 1 } as const;
 
 /** CRV slider range in R; position while TP is empty or invalid. */
-const CRV_SLIDER = { min: 0.5, max: 10, step: 0.1, fallback: 2 } as const;
-
-/** Decimals of the Bitunix BTC price tick (0.1 USD); a TP set by the CRV slider is rounded to it. */
-const TP_DECIMALS = 1;
+const CRV_SLIDER = { min: 0.5, max: 10, step: 0.1, fallback: DEFAULT_CRV } as const;
 
 export function InputPanel({ inputs, errors, onChange }: InputPanelProps) {
   // Missing fields are listed in the status panel; inline messages are for wrong values only.
@@ -39,9 +37,8 @@ export function InputPanel({ inputs, errors, onChange }: InputPanelProps) {
   const crv = crvBase !== null && tp !== null ? crvFromPrices(direction, crvBase.entry, crvBase.stop, tp) : null;
   // Dragging the CRV slider writes the TP for that CRV on the price tick; unreachable values are ignored.
   const setTpFromCrv = (target: number) => {
-    if (crvBase === null) return;
-    const next = tpOnTickForCrv(direction, crvBase.entry, crvBase.stop, target, TP_DECIMALS);
-    if (next !== null) onChange({ tp: toPlainDecimal(next, TP_DECIMALS) });
+    const next = tpInputForCrv(inputs, target);
+    if (next !== null) onChange({ tp: next });
   };
 
   const field = (

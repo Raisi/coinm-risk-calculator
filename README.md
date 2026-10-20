@@ -27,7 +27,8 @@ PAGES_BASE_PATH=/coinm-risk-calculator npm run build
 ```
 
 Die Rechenlogik liegt rein und ohne React in `src/lib/` (`calc.ts` Formeln, `evaluate.ts` Validierung und Ampel,
-`format.ts` Zahlen-Parsing, de-DE-Anzeige, Kopierwerte, Journal-TSV).
+`format.ts` Zahlen-Parsing, de-DE-Anzeige, Kopierwerte, Journal-TSV, `form.ts` Formularzustand inkl. TP-Vorbelegung
+für CRV 2).
 
 ## Deployment auf GitHub Pages
 

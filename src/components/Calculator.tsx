@@ -1,13 +1,14 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { DEFAULT_INPUTS, evaluate, type RawInputs } from "@/lib/evaluate";
+import { useMemo, useReducer } from "react";
+import { evaluate } from "@/lib/evaluate";
+import { applyInputPatch, INITIAL_FORM_STATE } from "@/lib/form";
 import { InputPanel } from "./InputPanel";
 import { Results } from "./Results";
 import { Warnings } from "./Warnings";
 
 export function Calculator() {
-  const [inputs, setInputs] = useState<RawInputs>(DEFAULT_INPUTS);
+  const [{ inputs }, applyPatch] = useReducer(applyInputPatch, INITIAL_FORM_STATE);
   const result = useMemo(() => evaluate(inputs), [inputs]);
 
   return (
@@ -15,7 +16,7 @@ export function Calculator() {
       <InputPanel
         inputs={inputs}
         errors={result.ok ? [] : result.errors}
-        onChange={(patch) => setInputs((previous) => ({ ...previous, ...patch }))}
+        onChange={applyPatch}
       />
       <div className="outputs">
         <Warnings result={result} />
