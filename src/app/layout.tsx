@@ -44,8 +44,9 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
               <Link href="/" className="site-nav__link" aria-current="true">
                 Rechner
               </Link>
-              <a href={KNOWLEDGE_HUB_URL} className="site-nav__link">
+              <a href={KNOWLEDGE_HUB_URL} className="site-nav__link" target="_blank" rel="noopener noreferrer">
                 Blockchain Knowledge Hub
+                <span className="sr-only">(öffnet in neuem Tab)</span>
                 <Icon name="arrowUpRight" size={12} />
               </a>
             </nav>
