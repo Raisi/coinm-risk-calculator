@@ -556,31 +556,18 @@ textarea {
   padding-inline: 0.625rem;
 }
 
-/* Read-only value box (CRV): same box as the typed fields (44px content + border), wide enough
-   for "10,00 R" so dragging does not shift the slider. */
-.slider-field__value {
-  width: auto;
-  min-width: max(84px, calc(7ch + 1.25rem + 2px));
-  height: calc(var(--control-height) + 2px);
-  justify-content: flex-end;
-  font-family: var(--font-mono);
-  font-size: 0.9375rem;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-  color: var(--text-primary);
-}
-
-.slider-field__value:hover {
-  border-color: var(--border-active);
-}
-
 .slider-field__slider:disabled {
   cursor: not-allowed;
   opacity: 0.4;
 }
 
-.slider-field:has(.slider-field__slider:disabled) .slider-field__value {
+.field__control:has(input:disabled) {
+  cursor: not-allowed;
+}
+
+.field__control input:disabled {
   color: var(--text-muted);
+  cursor: not-allowed;
 }
 
 .segmented__options {

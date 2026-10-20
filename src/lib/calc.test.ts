@@ -11,6 +11,7 @@ import {
   lossPerUsd,
   MAX_LEVERAGE,
   maxLeverageForFactor,
+  maxReachableCrv,
   netRiskBtc,
   positionSize,
   tpForCrv,
@@ -391,6 +392,62 @@ describe("tpForCrv exact long feasibility bound", () => {
     expect(Number.isFinite(tp!)).toBe(true);
     expect(tp!).toBeGreaterThan(entry);
     expectRel(crvFromPrices("long", entry, stop, tp!)!, r, 1e-6);
+  });
+});
+
+describe("maxReachableCrv", () => {
+  // Exclusive long bound stop / (entry − stop): 105500 / 2500 = 42.2, 70 / 30 = 7/3, 80000 / 20000 = 4.
+  it.each([
+    [108000, 105500, 42.2],
+    [100, 70, 70 / 30],
+    [100000, 80000, 4],
+    [100100, 100000, 1000],
+  ])("long entry %s, stop %s: bound is %s", (entry, stop, bound) => {
+    expect(maxReachableCrv("long", entry, stop)).toBe(bound);
+  });
+
+  it("long 100/70 is 2.333…", () => {
+    expect(maxReachableCrv("long", 100, 70)).toBeCloseTo(2.3333333333, 9);
+  });
+
+  it.each([
+    [108000, 110500],
+    [100, 150],
+    [0.1, 1],
+  ])("short entry %s, stop %s: unbounded (null)", (entry, stop) => {
+    expect(maxReachableCrv("short", entry, stop)).toBeNull();
+  });
+
+  it.each([
+    ["long", 108000, 108000],
+    ["long", 108000, 110500],
+    ["long", 108000, 0],
+    ["long", 108000, -1],
+    ["long", 0, 50],
+    ["long", NaN, 50],
+    ["long", 100, NaN],
+    ["long", Infinity, 50],
+    ["long", 100, -Infinity],
+    ["short", 108000, 108000],
+    ["short", 108000, 105500],
+    ["short", -150, -100],
+  ] as const)("%s entry %s, stop %s: unusable stop gives null", (direction, entry, stop) => {
+    expect(maxReachableCrv(direction, entry, stop)).toBeNull();
+  });
+
+  it("tpForCrv: below the bound gives a TP, exactly at and above it gives null (long 100/70)", () => {
+    // Exact: 1 / (1/100 − 2.3 · (1/70 − 1/100)) = 7000.
+    expect(tpForCrv("long", 100, 70, 2.3)).toBeCloseTo(7000, 6);
+    expect(tpForCrv("long", 100, 70, 70 / 30)).toBeNull();
+    expect(tpForCrv("long", 100, 70, 2.34)).toBeNull();
+    expect(tpOnTickForCrv("long", 100, 70, 70 / 30, 1)).toBeNull();
+  });
+
+  it("tpForCrv: exactly at the bound 42.2 is null, just below is finite (long 108000/105500)", () => {
+    expect(tpForCrv("long", 108000, 105500, 42.2)).toBeNull();
+    expect(tpOnTickForCrv("long", 108000, 105500, 42.2, 1)).toBeNull();
+    // Exact: 105500 · 108000 / (105500 − 42.19 · 2500) = 455760000.
+    expect(tpForCrv("long", 108000, 105500, 42.19)).toBeCloseTo(455760000, 0);
   });
 });
 

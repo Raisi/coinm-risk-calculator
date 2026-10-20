@@ -3,9 +3,9 @@
  * Pure, no React.
  */
 
-import { tpOnTickForCrv } from "./calc";
+import { maxReachableCrv, tpOnTickForCrv, validLossPerUsd } from "./calc";
 import { DEFAULT_INPUTS, type RawInputs } from "./evaluate";
-import { parseNumber, toPlainDecimal } from "./format";
+import { formatDe, parseNumber, toPlainDecimal } from "./format";
 
 /** CRV the take-profit is filled for until the user sets TP themselves. */
 export const DEFAULT_CRV = 2;
@@ -29,9 +29,44 @@ export function tpInputForCrv(inputs: Pick<RawInputs, "direction" | "entry" | "s
   return tp === null ? null : toPlainDecimal(tp, TP_DECIMALS);
 }
 
+export const TEXT_CRV_INVALID = "CRV muss größer als 0 sein.";
+export const TEXT_CRV_OFF_TICK = "CRV nicht erreichbar – kein TP-Preis auf dem 0,1-USD-Tick.";
+
+export function crvUnreachableText(max: number): string {
+  return `CRV nicht erreichbar – max. ${formatDe(max, 2)} R bei diesem Stop.`;
+}
+
+/** Outcome of a typed CRV: the TP input for it, or the inline error (`null`: none, e.g. an empty draft). */
+export type CrvTextResult = { tp: string } | { error: string | null };
+
+/**
+ * TP for a CRV typed as text (de or dot decimal). Unparseable or non-positive text gives
+ * `TEXT_CRV_INVALID`; a long target at or above `maxReachableCrv` gives `crvUnreachableText`; a target
+ * whose price rounds off the valid side of entry gives `TEXT_CRV_OFF_TICK`. Empty text and unusable
+ * entry/stop (the field is disabled then) give no error.
+ */
+export function tpInputForCrvText(
+  inputs: Pick<RawInputs, "direction" | "entry" | "stop">,
+  text: string,
+): CrvTextResult {
+  if (text.trim() === "") return { error: null };
+  const crv = parseNumber(text);
+  if (crv === null || !(crv > 0)) return { error: TEXT_CRV_INVALID };
+  const entry = parseNumber(inputs.entry);
+  const stop = parseNumber(inputs.stop);
+  if (entry === null || stop === null || validLossPerUsd(inputs.direction, entry, stop) === null) {
+    return { error: null };
+  }
+  const max = maxReachableCrv(inputs.direction, entry, stop);
+  if (max !== null && crv >= max) return { error: crvUnreachableText(max) };
+  const tp = tpInputForCrv(inputs, crv);
+  return tp === null ? { error: TEXT_CRV_OFF_TICK } : { tp };
+}
+
 /**
  * `tpAuto`: TP follows entry/stop/direction at `DEFAULT_CRV`. Becomes `false` for good once the user
- * sets TP (typing, pasting, clearing or the CRV slider).
+ * sets TP or the CRV (typing, pasting, clearing, the CRV slider or the CRV field, even when the CRV is
+ * not reachable and TP keeps its value).
  */
 export interface FormState {
   inputs: RawInputs;

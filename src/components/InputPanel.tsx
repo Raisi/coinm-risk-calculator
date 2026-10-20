@@ -4,7 +4,7 @@ import { useState, type ReactNode } from "react";
 import { crvFromPrices, MAX_LEVERAGE, MIN_LEVERAGE, validLossPerUsd } from "@/lib/calc";
 import { FIELD_LABELS, type InputError, type NumericField, type RawInputs } from "@/lib/evaluate";
 import { formatDe, formatDeCompact, parseNumber } from "@/lib/format";
-import { DEFAULT_CRV, tpInputForCrv } from "@/lib/form";
+import { DEFAULT_CRV, tpInputForCrvText } from "@/lib/form";
 
 interface InputPanelProps {
   inputs: RawInputs;
@@ -31,14 +31,21 @@ export function InputPanel({ inputs, errors, onChange }: InputPanelProps) {
   const entry = parseNumber(inputs.entry);
   const stop = parseNumber(inputs.stop);
   const tp = parseNumber(inputs.tp);
-  // Entry/stop the CRV slider works from; `null` disables it. Its position is the CRV of the current TP.
+  // Entry/stop the CRV slider and field work from; `null` disables them. They show the CRV of the current TP.
   const crvBase =
     entry !== null && stop !== null && validLossPerUsd(direction, entry, stop) !== null ? { entry, stop } : null;
   const crv = crvBase !== null && tp !== null ? crvFromPrices(direction, crvBase.entry, crvBase.stop, tp) : null;
-  // Dragging the CRV slider writes the TP for that CRV on the price tick; unreachable values are ignored.
-  const setTpFromCrv = (target: number) => {
-    const next = tpInputForCrv(inputs, target);
-    if (next !== null) onChange({ tp: next });
+  // While the CRV field is focused it keeps the typed text; otherwise it shows the CRV derived from TP.
+  const [crvDraft, setCrvDraft] = useState<string | null>(null);
+  const crvText = crvDraft ?? formatDe(crv ?? DEFAULT_CRV, 2);
+  const crvTyped = crvDraft === null ? null : tpInputForCrvText(inputs, crvDraft);
+  const crvError = crvTyped !== null && "error" in crvTyped ? (crvTyped.error ?? undefined) : undefined;
+  // Slider and field both write the TP for the CRV on the price tick and hand TP to the user; an
+  // unreachable or invalid CRV keeps the current TP.
+  const setCrv = (text: string) => {
+    if (crvDraft !== null) setCrvDraft(text);
+    const next = tpInputForCrvText(inputs, text);
+    onChange({ tp: "tp" in next ? next.tp : inputs.tp });
   };
 
   const field = (
@@ -107,13 +114,16 @@ export function InputPanel({ inputs, errors, onChange }: InputPanelProps) {
         <SliderField
           id="crv"
           label="CRV (setzt TP)"
-          value={crv}
-          onChange={(value) => setTpFromCrv(Number(value))}
+          value={crvText}
+          onChange={setCrv}
+          onFocus={() => setCrvDraft(crvText)}
+          onBlur={() => setCrvDraft(null)}
           {...CRV_SLIDER}
+          unit="R"
           formatValue={(v) => `${formatDe(v, 2)} R`}
-          readOnly
           disabled={crvBase === null}
           hint={crvBase === null ? "Entry und Stop eingeben" : undefined}
+          error={crvError}
         />
       </fieldset>
 
@@ -220,9 +230,13 @@ function NumberField({ id, label, value, onChange, unit, hint, optional, error }
 interface SliderFieldProps {
   id: string;
   label: string;
-  /** Raw typed value, or for a `readOnly` slider the number it shows (`null`: none, slider at `fallback`). */
-  value: string | number | null;
+  /** Raw typed value; the slider follows it. */
+  value: string;
+  /** Called by both the slider and the typed field. */
   onChange: (value: string) => void;
+  /** Focus and blur of the typed field. */
+  onFocus?: () => void;
+  onBlur?: () => void;
   min: number;
   max: number;
   step: number;
@@ -230,27 +244,24 @@ interface SliderFieldProps {
   fallback?: number;
   /** Unit beside the typed field. */
   unit?: string;
-  /** Screen-reader text for the slider position; for a `readOnly` slider also the displayed value. */
+  /** Screen-reader text for the slider position. */
   formatValue: (value: number) => string;
   /** Whole numbers only: numeric keypad and native number input instead of free decimal text. */
   integer?: boolean;
-  /** Replaces the typed field with a read-only value box; typed input belongs to another field. */
-  readOnly?: boolean;
-  /** Applies to the slider; `hint` is shown below it and describes it. */
+  /** Applies to the slider and the typed field; `hint` is shown below and describes both. */
   disabled?: boolean;
   hint?: string;
   error?: string;
 }
 
-/**
- * Range slider plus a typed field bound to the same raw value (or a read-only value box);
- * values outside the range pin the slider.
- */
+/** Range slider plus a typed field bound to the same raw value; values outside the range pin the slider. */
 function SliderField({
   id,
   label,
   value,
   onChange,
+  onFocus,
+  onBlur,
   min,
   max,
   step,
@@ -258,12 +269,11 @@ function SliderField({
   unit,
   formatValue,
   integer,
-  readOnly,
   disabled,
   hint,
   error,
 }: SliderFieldProps) {
-  const parsed = typeof value === "string" ? parseNumber(value) : value;
+  const parsed = parseNumber(value);
   // Dividing by the inverse step keeps decimal steps exact (14 / 10 = 1.4, but 14 * 0.1 = 1.4000000000000001).
   // A noisy value would be restored into the range after an ignored change, and Chrome's sanitised
   // "1.4" would then arrive as a spurious change event.
@@ -271,9 +281,6 @@ function SliderField({
     parsed === null ? fallback : Math.min(max, Math.max(min, Math.round(parsed / step) / (1 / step)));
   const hintId = hint !== undefined ? `${id}-hint` : undefined;
   const errorId = error !== undefined ? `${id}-error` : undefined;
-  // A read-only slider is the field's only control: it takes the label and announces the real
-  // (unpinned) value. Otherwise the typed field takes the label and carries the real value.
-  const shown = readOnly ? formatValue(parsed ?? fallback) : undefined;
   return (
     <div className="field">
       <label htmlFor={id} className="field__label">
@@ -283,36 +290,32 @@ function SliderField({
         <input
           type="range"
           className="slider-field__slider"
-          id={readOnly ? id : undefined}
           min={min}
           max={max}
           step={step}
           value={sliderValue}
           onChange={(e) => onChange(e.target.value)}
           disabled={disabled}
-          aria-label={readOnly ? undefined : `${label} (Schieberegler)`}
-          aria-valuetext={shown ?? formatValue(sliderValue)}
+          aria-label={`${label} (Schieberegler)`}
+          aria-valuetext={formatValue(sliderValue)}
           aria-describedby={hintId}
         />
-        {readOnly ? (
-          <output htmlFor={id} className="field__control slider-field__number slider-field__value" aria-live="off">
-            {shown}
-          </output>
-        ) : (
-          <span className="field__control slider-field__number">
-            <input
-              id={id}
-              {...(integer
-                ? { type: "number", inputMode: "numeric", min, max, step }
-                : { type: "text", inputMode: "decimal", autoComplete: "off", spellCheck: false })}
-              value={value ?? ""}
-              onChange={(e) => onChange(e.target.value)}
-              aria-invalid={error !== undefined}
-              aria-describedby={errorId}
-            />
-            {unit !== undefined && <span className="field__unit">{unit}</span>}
-          </span>
-        )}
+        <span className="field__control slider-field__number">
+          <input
+            id={id}
+            {...(integer
+              ? { type: "number", inputMode: "numeric", min, max, step }
+              : { type: "text", inputMode: "decimal", autoComplete: "off", spellCheck: false })}
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            onFocus={onFocus}
+            onBlur={onBlur}
+            disabled={disabled}
+            aria-invalid={error !== undefined}
+            aria-describedby={[hintId, errorId].filter(Boolean).join(" ") || undefined}
+          />
+          {unit !== undefined && <span className="field__unit">{unit}</span>}
+        </span>
       </div>
       {hint !== undefined && (
         <p id={hintId} className="field__hint">

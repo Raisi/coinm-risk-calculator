@@ -57,17 +57,27 @@ export function crvFromPrices(direction: Direction, entry: number, stop: number,
 }
 
 /**
+ * Exclusive upper bound of the CRV a take-profit can reach: a long gains at most 1/entry BTC per USD, so it
+ * needs `crv < stop / (entry - stop)`. `null` when there is no bound (short) or the stop is not usable
+ * (see `validLossPerUsd`).
+ */
+export function maxReachableCrv(direction: Direction, entry: number, stop: number): number | null {
+  if (direction === "short" || validLossPerUsd(direction, entry, stop) === null) return null;
+  return stop / (entry - stop);
+}
+
+/**
  * Take-profit price whose CRV (see `crvFromPrices`) equals `crv`.
  * Returns `null` when `crv` is not a finite positive number, the stop is not usable, or no finite price
- * beyond entry reaches the target: a long gains at most 1/entry BTC per USD, so it needs
- * `crv < stop / (entry - stop)`. That bound is checked directly because near it `1/entry - crv * loss`
- * cancels to a tiny float and would yield a huge bogus price.
+ * beyond entry reaches the target (see `maxReachableCrv`). That bound is checked directly because near it
+ * `1/entry - crv * loss` cancels to a tiny float and would yield a huge bogus price.
  */
 export function tpForCrv(direction: Direction, entry: number, stop: number, crv: number): number | null {
   if (!(crv > 0) || !Number.isFinite(crv)) return null;
   const loss = validLossPerUsd(direction, entry, stop);
   if (loss === null) return null;
-  if (direction === "long" && crv >= stop / (entry - stop)) return null;
+  const max = maxReachableCrv(direction, entry, stop);
+  if (max !== null && crv >= max) return null;
   const tp = 1 / (direction === "long" ? 1 / entry - crv * loss : 1 / entry + crv * loss);
   const beyondEntry = direction === "long" ? tp > entry : tp < entry;
   return Number.isFinite(tp) && tp > 0 && beyondEntry ? tp : null;
