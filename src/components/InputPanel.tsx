@@ -13,8 +13,8 @@ interface InputPanelProps {
 
 const ASSUMPTION_FIELDS: NumericField[] = ["bufferPct", "mmr", "safetyFactor", "nearFactor"];
 
-/** Drag range of the risk slider; larger values can still be typed (the limit warning covers them). 0 % shows the "> 0" error. */
-const RISK_SLIDER = { min: 0, max: 7, step: 0.25 } as const;
+/** Drag range of the risk slider in whole percent; finer values like 0,25 are typed. 0 % shows the "> 0" error. */
+const RISK_SLIDER = { min: 0, max: 100, step: 1 } as const;
 
 export function InputPanel({ inputs, errors, onChange }: InputPanelProps) {
   // Missing fields are listed in the status panel; inline messages are for wrong values only.
