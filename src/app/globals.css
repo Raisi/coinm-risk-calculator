@@ -204,6 +204,7 @@ textarea {
 .site-footer {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
   padding-bottom: 3rem;
@@ -214,7 +215,26 @@ textarea {
 }
 
 .site-footer__claim {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 0.625rem;
   text-transform: uppercase;
+}
+
+.site-footer__link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  /* 44px touch target without enlarging the footer line visually. */
+  min-height: var(--control-height);
+  color: var(--text-secondary);
+  text-decoration: none;
+  transition: color 160ms var(--ease-out);
+}
+
+.site-footer__link:hover {
+  color: var(--accent-primary);
 }
 
 /* ---------- Hero ---------- */

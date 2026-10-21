@@ -7,6 +7,9 @@ Dazu Kopierwerte für das Bitunix-Orderpanel, Preisleiste, Warnungen und Journal
 
 Alles läuft im Browser: kein Backend, keine Exchange-API, keine Schlüssel, keine Netzwerkaufrufe.
 
+Live: <https://raisi.github.io/coinm-risk-calculator/> · Fehler und Wünsche bitte als
+[Issue](https://github.com/Raisi/coinm-risk-calculator/issues) melden.
+
 ## Entwicklung
 
 Voraussetzung: Node.js 24 und npm.

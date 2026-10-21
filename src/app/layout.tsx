@@ -15,6 +15,7 @@ const outfit = Outfit({
 });
 
 const KNOWLEDGE_HUB_URL = "https://raisi.github.io/blockchain-info-helpers/";
+const REPO_URL = "https://github.com/Raisi/coinm-risk-calculator";
 
 export const metadata: Metadata = {
   title: "Coin-M Positionsrechner",
@@ -54,7 +55,21 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         </header>
         {children}
         <footer className="container site-footer">
-          <span className="site-footer__claim">Open Source · läuft lokal</span>
+          <span className="site-footer__claim">
+            <a href={REPO_URL} className="site-footer__link" target="_blank" rel="noopener noreferrer">
+              Open Source auf GitHub
+              <span className="sr-only">(öffnet in neuem Tab)</span>
+              <Icon name="arrowUpRight" size={12} />
+            </a>
+            <span aria-hidden="true">·</span>
+            <a href={`${REPO_URL}/issues`} className="site-footer__link" target="_blank" rel="noopener noreferrer">
+              Feedback &amp; Issues
+              <span className="sr-only">(öffnet in neuem Tab)</span>
+              <Icon name="arrowUpRight" size={12} />
+            </a>
+            <span aria-hidden="true">·</span>
+            <span>läuft lokal</span>
+          </span>
           <span>Keine Finanzberatung · Bitunix-Panel ist maßgeblich</span>
         </footer>
       </body>
