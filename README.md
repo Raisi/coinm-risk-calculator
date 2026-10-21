@@ -10,6 +10,20 @@ Alles läuft im Browser: kein Backend, keine Exchange-API, keine Schlüssel, kei
 Live: <https://raisi.github.io/coinm-risk-calculator/> · Fehler und Wünsche bitte als
 [Issue](https://github.com/Raisi/coinm-risk-calculator/issues) melden.
 
+## Modi
+
+- **Konto in BTC | USDT.** BTC: Kontostand und Risiko in BTC (bisheriges Verhalten). USDT: Kontostand in USDT, Risiko
+  in % oder als fester USDT-Betrag = Verlust bei Stop, bewertet zum Stop-Kurs. Die Position ist dann linear
+  `Risiko USDT · Entry / |Entry − Stop|` USD groß; Margin, Liquidation und Kopierwerte bleiben in BTC/USD.
+  In beiden Modi zeigt die Risiko-Karte Verlust bei Stop und Gewinn bei TP zusätzlich in USDT (bewertet zum
+  Stop-/TP-Kurs, ohne die Kursänderung der BTC-Sicherheit selbst).
+- **CRV-Basis BTC | USD.** BTC: Gewinn in BTC ÷ Risiko in BTC (inverser Kontrakt, Long nach oben begrenzt).
+  USD: linear `|TP − Entry| / |Entry − Stop|` wie im Chart, TP = Entry + R · (Entry − Stop); ein Short ist hier durch
+  TP > 0 begrenzt. Gilt für CRV-Regler, TP, CRV-Kennzahl, Preisleiste, Journal und den TP-Plan.
+- **TP-Plan Leiter | Teil-TPs.** Leiter: TP-Preise (0,1-USD-Tick) für 1–10 R mit Abstand und Gewinn. Teil-TPs: drei
+  TPs mit R und Anteil (Summe 100 %), je TP-Preis, abgerundete Kopiermenge in BTC (Rest auf dem letzten Teil),
+  Gewinn sowie Gesamtgewinn und gewichteter CRV.
+
 ## Entwicklung
 
 Voraussetzung: Node.js 24 und npm.
@@ -31,7 +45,7 @@ PAGES_BASE_PATH=/coinm-risk-calculator npm run build
 
 Die Rechenlogik liegt rein und ohne React in `src/lib/` (`calc.ts` Formeln, `evaluate.ts` Validierung und Ampel,
 `format.ts` Zahlen-Parsing, de-DE-Anzeige, Kopierwerte, Journal-TSV, `form.ts` Formularzustand inkl. TP-Vorbelegung
-für CRV 2).
+für CRV 2, `tpPlan.ts` TP-Leiter und Teil-TPs).
 
 ## Deployment auf GitHub Pages
 

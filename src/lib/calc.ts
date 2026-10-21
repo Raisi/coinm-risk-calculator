@@ -4,24 +4,30 @@
  */
 
 export type Direction = "long" | "short";
-export type RiskMode = "pct" | "btc";
+/** `amount`: a fixed risk amount in the account unit (BTC or USDT). */
+export type RiskMode = "pct" | "amount";
+/** Unit of the account balance and the risk budget. */
+export type AccountUnit = "btc" | "usdt";
+/**
+ * What a CRV measures: `btc` the gain in BTC per BTC risked (inverse contract), `usd` the linear price
+ * distance `|tp - entry| / |entry - stop|` (chart / spreadsheet R).
+ */
+export type CrvBasis = "btc" | "usd";
 
 export const MIN_LEVERAGE = 1;
 export const MAX_LEVERAGE = 50;
 
-/** Risk budget before fees/slippage buffer: % of balance or a fixed BTC amount. */
-export function grossRiskBtc(
-  mode: RiskMode,
-  balanceBtc: number,
-  riskPct: number,
-  riskBtcInput: number,
-): number {
-  return mode === "pct" ? (balanceBtc * riskPct) / 100 : riskBtcInput;
+/** Decimals of the Bitunix BTC price tick (0.1 USD); a TP derived from a CRV is rounded to it. */
+export const TP_DECIMALS = 1;
+
+/** Risk budget before fees/slippage buffer, in the account unit: % of balance or a fixed amount. */
+export function grossRisk(mode: RiskMode, balance: number, riskPct: number, riskAmount: number): number {
+  return mode === "pct" ? (balance * riskPct) / 100 : riskAmount;
 }
 
-/** Risk used for sizing after reserving `bufferPct` % for fees/slippage. */
-export function netRiskBtc(grossRisk: number, bufferPct: number): number {
-  return grossRisk * (1 - bufferPct / 100);
+/** Risk used for sizing after reserving `bufferPct` % for fees/slippage (same unit as `gross`). */
+export function netRisk(gross: number, bufferPct: number): number {
+  return gross * (1 - bufferPct / 100);
 }
 
 /** BTC lost per 1 USD of notional when the stop is hit. */
@@ -45,40 +51,61 @@ export function validLossPerUsd(direction: Direction, entry: number, stop: numbe
 }
 
 /**
- * CRV from prices alone: `gainPerUsd / lossPerUsd`, independent of size, risk and buffer.
+ * CRV from prices alone, independent of size, risk and buffer: `btc` basis `gainPerUsd / lossPerUsd`,
+ * `usd` basis `|tp - entry| / |entry - stop|`.
  * `null` when the stop is not usable (see `validLossPerUsd`) or `tp` is not a finite price beyond entry.
  */
-export function crvFromPrices(direction: Direction, entry: number, stop: number, tp: number): number | null {
+export function crvFromPrices(
+  basis: CrvBasis,
+  direction: Direction,
+  entry: number,
+  stop: number,
+  tp: number,
+): number | null {
   const loss = validLossPerUsd(direction, entry, stop);
   const beyondEntry = direction === "long" ? tp > entry : tp > 0 && tp < entry;
   if (loss === null || !Number.isFinite(tp) || !beyondEntry) return null;
-  const crv = gainPerUsd(direction, entry, tp) / loss;
+  const crv =
+    basis === "btc" ? gainPerUsd(direction, entry, tp) / loss : Math.abs(tp - entry) / Math.abs(entry - stop);
   return crv > 0 && Number.isFinite(crv) ? crv : null;
 }
 
 /**
- * Exclusive upper bound of the CRV a take-profit can reach: a long gains at most 1/entry BTC per USD, so it
- * needs `crv < stop / (entry - stop)`. `null` when there is no bound (short) or the stop is not usable
- * (see `validLossPerUsd`).
+ * Exclusive upper bound of the CRV a take-profit can reach, or `null` when there is none or the stop is not
+ * usable (see `validLossPerUsd`).
+ * - `btc` basis: a long gains at most 1/entry BTC per USD, so it needs `crv < stop / (entry - stop)`;
+ *   a short has no bound.
+ * - `usd` basis: a short's TP must stay above 0, so it needs `crv < entry / (stop - entry)`; a long has
+ *   no bound.
  */
-export function maxReachableCrv(direction: Direction, entry: number, stop: number): number | null {
-  if (direction === "short" || validLossPerUsd(direction, entry, stop) === null) return null;
-  return stop / (entry - stop);
+export function maxReachableCrv(basis: CrvBasis, direction: Direction, entry: number, stop: number): number | null {
+  if (validLossPerUsd(direction, entry, stop) === null) return null;
+  if (basis === "btc") return direction === "long" ? stop / (entry - stop) : null;
+  return direction === "short" ? entry / (stop - entry) : null;
 }
 
 /**
- * Take-profit price whose CRV (see `crvFromPrices`) equals `crv`.
+ * Take-profit price whose CRV (see `crvFromPrices`) in `basis` equals `crv`.
  * Returns `null` when `crv` is not a finite positive number, the stop is not usable, or no finite price
  * beyond entry reaches the target (see `maxReachableCrv`). That bound is checked directly because near it
- * `1/entry - crv * loss` cancels to a tiny float and would yield a huge bogus price.
+ * the TP formula cancels to a tiny float and would yield a huge bogus (or tiny) price.
  */
-export function tpForCrv(direction: Direction, entry: number, stop: number, crv: number): number | null {
+export function tpForCrv(
+  basis: CrvBasis,
+  direction: Direction,
+  entry: number,
+  stop: number,
+  crv: number,
+): number | null {
   if (!(crv > 0) || !Number.isFinite(crv)) return null;
   const loss = validLossPerUsd(direction, entry, stop);
   if (loss === null) return null;
-  const max = maxReachableCrv(direction, entry, stop);
+  const max = maxReachableCrv(basis, direction, entry, stop);
   if (max !== null && crv >= max) return null;
-  const tp = 1 / (direction === "long" ? 1 / entry - crv * loss : 1 / entry + crv * loss);
+  const tp =
+    basis === "usd"
+      ? entry + crv * (entry - stop)
+      : 1 / (direction === "long" ? 1 / entry - crv * loss : 1 / entry + crv * loss);
   const beyondEntry = direction === "long" ? tp > entry : tp < entry;
   return Number.isFinite(tp) && tp > 0 && beyondEntry ? tp : null;
 }
@@ -90,13 +117,14 @@ export function tpForCrv(direction: Direction, entry: number, stop: number, crv:
  * `null` when `tpForCrv` is `null` or the rounded price is not beyond entry.
  */
 export function tpOnTickForCrv(
+  basis: CrvBasis,
   direction: Direction,
   entry: number,
   stop: number,
   crv: number,
   decimals: number,
 ): number | null {
-  const tp = tpForCrv(direction, entry, stop, crv);
+  const tp = tpForCrv(basis, direction, entry, stop, crv);
   if (tp === null) return null;
   // Integer tick count divided by the scale is the double closest to the decimal price, e.g. 108000.3.
   const scale = 10 ** decimals;

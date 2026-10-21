@@ -1139,6 +1139,196 @@ textarea {
   white-space: nowrap;
 }
 
+.details__note {
+  margin-top: 0.75rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+/* Take-Profits */
+
+.tps {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.tps__note {
+  max-width: 70ch;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.tp-ladder,
+.tp-parts {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Rows stack (level + price, then distance and gain) and spread to one line in a wide results column. */
+.tp-ladder__row {
+  display: grid;
+  grid-template-columns: 3.5rem minmax(0, 1fr);
+  grid-template-areas:
+    "crv price"
+    ". meta";
+  align-items: center;
+  gap: 0.25rem 0.75rem;
+  padding-block: 0.5rem;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.tp-ladder__row:last-child,
+.tp-part:last-child {
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.tp-ladder__crv {
+  grid-area: crv;
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent-primary);
+}
+
+.tp-ladder__row > .tp-copy,
+.tp-ladder__unreachable {
+  grid-area: price;
+}
+
+.tp-ladder__row > .tp-meta {
+  grid-area: meta;
+}
+
+.tp-ladder__unreachable {
+  display: flex;
+  align-items: center;
+  min-height: var(--control-height);
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+}
+
+@container (min-width: 42rem) {
+  .tp-ladder__row {
+    grid-template-columns: 3.5rem minmax(0, 15rem) minmax(0, 1fr);
+    grid-template-areas: "crv price meta";
+  }
+
+  .tp-ladder__row > .tp-meta {
+    justify-content: flex-end;
+  }
+}
+
+.tp-copy {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.375rem 0.75rem;
+  min-width: 0;
+}
+
+.tp-copy__value {
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 1rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+  word-break: break-all;
+  user-select: all;
+}
+
+.tp-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.125rem 0.75rem;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+
+.tp-part {
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+  padding-block: 0.875rem;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.tp-part__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.75rem;
+}
+
+.tp-part__name {
+  font-family: var(--font-mono);
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--accent-primary);
+}
+
+.tp-part__meta {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+}
+
+.tp-part__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.75rem;
+}
+
+@container (min-width: 42rem) {
+  .tp-part__grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.tp-part__item {
+  min-width: 0;
+}
+
+.tp-part__item dd {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-top: 0.25rem;
+}
+
+.tp-part__label {
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.tp-part__gain,
+.tp-part__none {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.tp-part__none {
+  color: var(--text-muted);
+}
+
+.tp-part__exact {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
 /* Journal */
 
 .journal {

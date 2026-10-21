@@ -2,7 +2,13 @@
 
 import { useRef, useState, type ReactNode } from "react";
 import { crvFromPrices, MAX_LEVERAGE, MIN_LEVERAGE, validLossPerUsd } from "@/lib/calc";
-import { FIELD_LABELS, type InputError, type NumericField, type RawInputs } from "@/lib/evaluate";
+import {
+  FIELD_LABELS,
+  TP_PART_FIELDS,
+  type InputError,
+  type NumericField,
+  type RawInputs,
+} from "@/lib/evaluate";
 import { formatDe, formatDeCompact, parseNumber } from "@/lib/format";
 import { DEFAULT_CRV, tpInputForCrvText } from "@/lib/form";
 
@@ -31,15 +37,19 @@ export function InputPanel({ inputs, targetCrv, errors, onChange, onCrvChange }:
   const assumptionsInvalid = ASSUMPTION_FIELDS.some((f) => fieldError(f) !== undefined);
   const [assumptionsOpen, setAssumptionsOpen] = useState(false);
 
-  const { direction } = inputs;
+  const { account, direction, crvBasis } = inputs;
+  const accountUnit = account === "btc" ? "BTC" : "USDT";
   const entry = parseNumber(inputs.entry);
   const stop = parseNumber(inputs.stop);
   const tp = parseNumber(inputs.tp);
   // Entry/stop the CRV slider and field work from; `null` disables them. They show the CRV of the current
-  // TP, or while TP is empty the CRV target.
+  // TP in the active basis, or while TP is empty the CRV target.
   const crvBase =
     entry !== null && stop !== null && validLossPerUsd(direction, entry, stop) !== null ? { entry, stop } : null;
-  const crv = crvBase !== null && tp !== null ? crvFromPrices(direction, crvBase.entry, crvBase.stop, tp) : null;
+  const crv =
+    crvBase !== null && tp !== null ? crvFromPrices(crvBasis, direction, crvBase.entry, crvBase.stop, tp) : null;
+  // Unparseable shares count as 0 here; their fields show the error.
+  const shareSum = TP_PART_FIELDS.reduce((sum, part) => sum + (parseNumber(inputs[part.share]) ?? 0), 0);
   // Accepted CRV shown by the slider and, unless being edited, the field. Once the user edits the focused
   // field it keeps the typed draft until blur; the slider never follows a draft. Focus alone starts no
   // draft, so the rounded display text is never validated as if typed.
@@ -73,14 +83,24 @@ export function InputPanel({ inputs, targetCrv, errors, onChange, onCrvChange }:
     <form className="inputs" onSubmit={(e) => e.preventDefault()} noValidate aria-label="Eingaben">
       <fieldset className="card group">
         <GroupTitle number="01">Konto &amp; Risiko</GroupTitle>
-        {field("balance", { unit: "BTC" })}
+        <Segmented
+          name="account"
+          legend="Konto in"
+          value={account}
+          options={[
+            { value: "btc", label: "BTC" },
+            { value: "usdt", label: "USDT" },
+          ]}
+          onChange={(value) => onChange({ account: value })}
+        />
+        {account === "btc" ? field("balance", { unit: "BTC" }) : field("balanceUsdt", { unit: "USDT" })}
         <Segmented
           name="riskMode"
           legend="Risiko-Modus"
           value={inputs.riskMode}
           options={[
             { value: "pct", label: "in %" },
-            { value: "btc", label: "in BTC" },
+            { value: "amount", label: `in ${accountUnit}` },
           ]}
           onChange={(riskMode) => onChange({ riskMode })}
         />
@@ -95,8 +115,10 @@ export function InputPanel({ inputs, targetCrv, errors, onChange, onCrvChange }:
             formatValue={(v) => `${formatDeCompact(v, 2)} %`}
             error={fieldError("riskPct")}
           />
-        ) : (
+        ) : account === "btc" ? (
           field("riskBtc", { unit: "BTC" })
+        ) : (
+          field("riskUsdt", { unit: "USDT", hint: "Verlust bei Stop, bewertet zum Stop-Kurs" })
         )}
         {field("riskLimitPct", { unit: "%", hint: "Kursvorgabe: max. 5–10 % pro Trade" })}
       </fieldset>
@@ -118,6 +140,17 @@ export function InputPanel({ inputs, targetCrv, errors, onChange, onCrvChange }:
           {field("stop", { unit: "USD" })}
         </div>
         {field("tp", { unit: "USD", optional: true })}
+        <Segmented
+          name="crvBasis"
+          legend="CRV-Basis"
+          value={crvBasis}
+          options={[
+            { value: "btc", label: "BTC" },
+            { value: "usd", label: "USD" },
+          ]}
+          onChange={(value) => onChange({ crvBasis: value })}
+          hint="USD = linear wie Chart/Tabelle, BTC = Gewinn in BTC"
+        />
         <SliderField
           id="crv"
           label="CRV (setzt TP)"
@@ -160,6 +193,36 @@ export function InputPanel({ inputs, targetCrv, errors, onChange, onCrvChange }:
           optional: true,
           hint: "Aus dem Bitunix-Orderpanel – wenn gesetzt, maßgeblich vor der Berechnung.",
         })}
+      </fieldset>
+
+      <fieldset className="card group">
+        <GroupTitle number="04">Take-Profit-Plan</GroupTitle>
+        <Segmented
+          name="tpPlan"
+          legend="Plan"
+          value={inputs.tpPlan}
+          options={[
+            { value: "ladder", label: "Leiter" },
+            { value: "partial", label: "Teil-TPs" },
+          ]}
+          onChange={(tpPlan) => onChange({ tpPlan })}
+          hint={
+            inputs.tpPlan === "ladder"
+              ? "TP-Preise von 1 bis 10 R in der CRV-Basis"
+              : "Bis zu drei TPs, jeder schließt einen Anteil der Position"
+          }
+        />
+        {inputs.tpPlan === "partial" && (
+          <>
+            {TP_PART_FIELDS.map((part) => (
+              <div key={part.crv} className="field-row">
+                {field(part.crv, { unit: "R" })}
+                {field(part.share, { unit: "%" })}
+              </div>
+            ))}
+            <p className="field__hint">Summe der Anteile: {formatDeCompact(shareSum, 2)} % (muss 100 % ergeben)</p>
+          </>
+        )}
       </fieldset>
 
       <details
@@ -354,11 +417,14 @@ interface SegmentedProps<T extends string> {
   /** `marker` is a decorative glyph before the label; options with a marker get their own active colour. */
   options: { value: T; label: string; marker?: string }[];
   onChange: (value: T) => void;
+  /** Short explanation below the options; describes the group. */
+  hint?: string;
 }
 
-function Segmented<T extends string>({ name, legend, value, options, onChange }: SegmentedProps<T>) {
+function Segmented<T extends string>({ name, legend, value, options, onChange, hint }: SegmentedProps<T>) {
+  const hintId = hint !== undefined ? `${name}-hint` : undefined;
   return (
-    <fieldset className="segmented">
+    <fieldset className="segmented" aria-describedby={hintId}>
       <legend className="field__label">{legend}</legend>
       <div className="segmented__options">
         {options.map((option) => (
@@ -381,6 +447,11 @@ function Segmented<T extends string>({ name, legend, value, options, onChange }:
           </label>
         ))}
       </div>
+      {hint !== undefined && (
+        <p id={hintId} className="field__hint">
+          {hint}
+        </p>
+      )}
     </fieldset>
   );
 }
