@@ -8,6 +8,7 @@ import {
   INITIAL_FORM_STATE,
   tpInputForCrv,
   tpInputForCrvText,
+  TEXT_CRV_OFF_TICK,
   type CrvTextResult,
   type FormAction,
   type FormState,
@@ -16,6 +17,9 @@ import { parseNumber } from "./format";
 
 /** Plain dot decimal on the 0.1 tick: no grouping, no exponent, no trailing ".0". */
 const PLAIN_TICK = /^(0|[1-9]\d*)(\.\d)?$/;
+
+/** Raw inputs a CRV-derived TP depends on. */
+type CrvInputs = Pick<RawInputs, "crvBasis" | "direction" | "entry" | "stop">;
 
 function patch(fields: Partial<RawInputs>): FormAction {
   return { type: "patch", patch: fields };
@@ -79,8 +83,8 @@ function expectCrvBracketedByTick(
   expect(tp).not.toBeNull();
   const towardEntry = direction === "long" ? (tp as number) - 0.05 : (tp as number) + 0.05;
   const awayFromEntry = direction === "long" ? (tp as number) + 0.05 : (tp as number) - 0.05;
-  const crvToward = crvFromPrices(direction, entry, stop, towardEntry);
-  const crvAway = crvFromPrices(direction, entry, stop, awayFromEntry);
+  const crvToward = crvFromPrices("btc", direction, entry, stop, towardEntry);
+  const crvAway = crvFromPrices("btc", direction, entry, stop, awayFromEntry);
   // Toward entry may fall onto/through entry, where no CRV exists: that is below any positive target.
   if (crvToward !== null) expect(crvToward).toBeLessThanOrEqual(crv);
   expect(crvAway).not.toBeNull();
@@ -94,7 +98,7 @@ const NON_TRADE_PATCHES: Partial<RawInputs>[] = [
   { riskPct: "abc" },
   { leverage: "25" },
   { mmr: "0.01" },
-  { riskMode: "btc" },
+  { riskMode: "amount" },
   { riskMode: "pct" },
   { riskBtc: "0.0001" },
   { riskLimitPct: "3" },
@@ -102,6 +106,15 @@ const NON_TRADE_PATCHES: Partial<RawInputs>[] = [
   { safetyFactor: "3" },
   { nearFactor: "2" },
   { panelLiq: "90000" },
+  { account: "usdt" },
+  { account: "btc" },
+  { balanceUsdt: "1000" },
+  { riskUsdt: "25" },
+  { tpPlan: "partial" },
+  { tpPlan: "ladder" },
+  { tp1Crv: "1.5" },
+  { tp2Share: "40" },
+  { tp3Crv: "" },
 ];
 
 // Expected TPs below come from exact rational arithmetic, rounded to the nearest 0.1 USD:
@@ -489,7 +502,7 @@ describe("formReducer – merging and immutability", () => {
       inputs: {
         ...DEFAULT_INPUTS,
         balance: "1.5",
-        riskMode: "btc",
+        riskMode: "amount",
         riskBtc: "0.01",
         leverage: "20",
         mmr: "0.005",
@@ -555,7 +568,7 @@ describe("formReducer – merging and immutability", () => {
 });
 
 describe("tpInputForCrv", () => {
-  const valid = { direction: "long" as const, entry: "108000", stop: "105500" };
+  const valid = { crvBasis: "btc" as const, direction: "long" as const, entry: "108000", stop: "105500" };
 
   it("is null for empty or unparsable entry/stop", () => {
     expect(tpInputForCrv({ ...valid, entry: "" }, 2)).toBeNull();
@@ -569,17 +582,17 @@ describe("tpInputForCrv", () => {
   it("is null for a stop on the wrong side or at entry", () => {
     expect(tpInputForCrv({ ...valid, stop: "110000" }, 2)).toBeNull();
     expect(tpInputForCrv({ ...valid, stop: "108000" }, 2)).toBeNull();
-    expect(tpInputForCrv({ direction: "short", entry: "108000", stop: "105500" }, 2)).toBeNull();
-    expect(tpInputForCrv({ direction: "short", entry: "108000", stop: "108000" }, 2)).toBeNull();
+    expect(tpInputForCrv({ crvBasis: "btc", direction: "short", entry: "108000", stop: "105500" }, 2)).toBeNull();
+    expect(tpInputForCrv({ crvBasis: "btc", direction: "short", entry: "108000", stop: "108000" }, 2)).toBeNull();
     expect(tpInputForCrv({ ...valid, stop: "0" }, 2)).toBeNull();
     expect(tpInputForCrv({ ...valid, stop: "-1" }, 2)).toBeNull();
   });
 
   it("is null when no price reaches the CRV", () => {
-    expect(tpInputForCrv({ direction: "long", entry: "100", stop: "60" }, 2)).toBeNull();
-    expect(tpInputForCrv({ direction: "long", entry: "90", stop: "60" }, 2)).toBeNull();
+    expect(tpInputForCrv({ crvBasis: "btc", direction: "long", entry: "100", stop: "60" }, 2)).toBeNull();
+    expect(tpInputForCrv({ crvBasis: "btc", direction: "long", entry: "90", stop: "60" }, 2)).toBeNull();
     // Short whose CRV-2 price rounds to 0 on the 0.1 tick: tpForCrv ≈ 0.036.
-    expect(tpInputForCrv({ direction: "short", entry: "0.1", stop: "1" }, 2)).toBeNull();
+    expect(tpInputForCrv({ crvBasis: "btc", direction: "short", entry: "0.1", stop: "1" }, 2)).toBeNull();
     expect(tpInputForCrv(valid, 0)).toBeNull();
     expect(tpInputForCrv(valid, -1)).toBeNull();
     expect(tpInputForCrv(valid, Number.NaN)).toBeNull();
@@ -618,7 +631,7 @@ describe("tpInputForCrv", () => {
 
   for (const { direction, entry, stop, crv, tp } of cases) {
     it(`${direction} ${entry}/${stop} CRV ${crv}: ${tp} as a plain tick decimal`, () => {
-      const out = tpInputForCrv({ direction, entry, stop }, crv);
+      const out = tpInputForCrv({ crvBasis: "btc", direction, entry, stop }, crv);
       expect(out).toBe(tp);
       expect(out as string).toMatch(PLAIN_TICK);
       expectCrvBracketedByTick(direction, Number(entry), Number(stop), crv, out as string);
@@ -626,20 +639,20 @@ describe("tpInputForCrv", () => {
   }
 
   it("parses German and padded input like the form does", () => {
-    expect(tpInputForCrv({ direction: "long", entry: "108.000,0", stop: "105.500,0" }, 2)).toBe("113373.1");
-    expect(tpInputForCrv({ direction: "long", entry: " 108 000 ", stop: "105500" }, 2)).toBe("113373.1");
+    expect(tpInputForCrv({ crvBasis: "btc", direction: "long", entry: "108.000,0", stop: "105.500,0" }, 2)).toBe("113373.1");
+    expect(tpInputForCrv({ crvBasis: "btc", direction: "long", entry: " 108 000 ", stop: "105500" }, 2)).toBe("113373.1");
   });
 
   it("drops a trailing .0 when the tick price is whole", () => {
     // Short 100/120: exact 75. Short 100/129: exact 68.98…, rounds up to 69.
-    expect(tpInputForCrv({ direction: "short", entry: "100", stop: "120" }, 2)).toBe("75");
-    expect(tpInputForCrv({ direction: "short", entry: "100", stop: "129" }, 2)).toBe("69");
+    expect(tpInputForCrv({ crvBasis: "btc", direction: "short", entry: "100", stop: "120" }, 2)).toBe("75");
+    expect(tpInputForCrv({ crvBasis: "btc", direction: "short", entry: "100", stop: "129" }, 2)).toBe("69");
   });
 });
 
 describe("tpInputForCrvText", () => {
-  const long = { direction: "long" as const, entry: "108000", stop: "105500" };
-  const short = { direction: "short" as const, entry: "108000", stop: "110500" };
+  const long = { crvBasis: "btc" as const, direction: "long" as const, entry: "108000", stop: "105500" };
+  const short = { crvBasis: "btc" as const, direction: "short" as const, entry: "108000", stop: "110500" };
   const INVALID = "CRV muss größer als 0 sein.";
 
   it("formats the unreachable error text", () => {
@@ -665,7 +678,7 @@ describe("tpInputForCrvText", () => {
     expect(tpInputForCrvText({ ...long, stop: "110000" }, "0")).toEqual({ error: INVALID });
   });
 
-  const unusable: { name: string; inputs: Pick<RawInputs, "direction" | "entry" | "stop"> }[] = [
+  const unusable: { name: string; inputs: CrvInputs }[] = [
     { name: "empty entry", inputs: { ...long, entry: "" } },
     { name: "empty stop", inputs: { ...long, stop: "" } },
     { name: "unparsable entry", inputs: { ...long, entry: "abc" } },
@@ -693,13 +706,13 @@ describe("tpInputForCrvText", () => {
   });
 
   it("long 100/70: CRV 2.5 is above max 7/3", () => {
-    expect(tpInputForCrvText({ direction: "long", entry: "100", stop: "70" }, "2,5")).toEqual({
+    expect(tpInputForCrvText({ crvBasis: "btc", direction: "long", entry: "100", stop: "70" }, "2,5")).toEqual({
       error: "CRV nicht erreichbar – max. 2,33 R bei diesem Stop.",
     });
   });
 
   it("long 100100/100000: max 1000 is shown with grouping", () => {
-    expect(tpInputForCrvText({ direction: "long", entry: "100100", stop: "100000" }, "1000")).toEqual({
+    expect(tpInputForCrvText({ crvBasis: "btc", direction: "long", entry: "100100", stop: "100000" }, "1000")).toEqual({
       error: "CRV nicht erreichbar – max. 1.000,00 R bei diesem Stop.",
     });
   });
@@ -708,7 +721,7 @@ describe("tpInputForCrvText", () => {
   //   long  tp = 1 / (1/entry − crv·(1/stop − 1/entry))
   //   short tp = 1 / (1/entry + crv·(1/entry − 1/stop))
   const reachable: {
-    inputs: Pick<RawInputs, "direction" | "entry" | "stop">;
+    inputs: CrvInputs;
     text: string;
     expected: CrvTextResult;
   }[] = [
@@ -726,9 +739,9 @@ describe("tpInputForCrvText", () => {
     // just below the bound: exact 455760000
     { inputs: long, text: "42,19", expected: { tp: "455760000" } },
     // long 100/70: exact 7000
-    { inputs: { direction: "long", entry: "100", stop: "70" }, text: "2.3", expected: { tp: "7000" } },
+    { inputs: { ...long, entry: "100", stop: "70" }, text: "2.3", expected: { tp: "7000" } },
     // German entry/stop (comma makes dots thousands separators): exact 116265.306…
-    { inputs: { direction: "long", entry: "108.000,0", stop: "105.500,0" }, text: "3", expected: { tp: "116265.3" } },
+    { inputs: { ...long, entry: "108.000,0", stop: "105.500,0" }, text: "3", expected: { tp: "116265.3" } },
     // Short is unbounded: exact 50675.159… (= 108000 − 9000000/157)
     { inputs: short, text: "50", expected: { tp: "50675.2" } },
     // exact 103324.675…
@@ -748,10 +761,107 @@ describe("tpInputForCrvText", () => {
     // exact 107999.9756… (= 108000 − 108000/4420001): rounds onto entry
     { inputs: short, text: "0.00001" },
     // exact 0.0357… (= 1 / 28): rounds to 0, not a positive price
-    { inputs: { direction: "short" as const, entry: "0.1", stop: "1" }, text: "2" },
+    { inputs: { ...short, entry: "0.1", stop: "1" }, text: "2" },
   ])("$inputs.direction $inputs.entry/$inputs.stop $text: no TP on the 0.1 tick", ({ inputs, text }) => {
     expect(tpInputForCrvText(inputs, text)).toEqual({
       error: "CRV nicht erreichbar – kein TP-Preis auf dem 0,1-USD-Tick.",
     });
+  });
+});
+
+describe("CRV basis usd", () => {
+  /** `trade` with the usd basis selected first. */
+  function usdTrade(direction: Direction, entry: string, stop: string): FormState {
+    return run(INITIAL_FORM_STATE, [patch({ crvBasis: "usd" }), patch({ direction }), patch({ entry }), patch({ stop })]);
+  }
+
+  // usd: tp = entry + crv · (entry − stop).
+  it("CRV target: switching the basis keeps the CRV and recomputes TP (108000/105500: 113373.1 <-> 113000)", () => {
+    const btc = trade("long", "108000", "105500");
+    expect(btc.inputs.tp).toBe("113373.1");
+
+    const usd = formReducer(btc, patch({ crvBasis: "usd" }));
+    expect(usd).toEqual({
+      inputs: { ...btc.inputs, crvBasis: "usd", tp: "113000" },
+      target: { kind: "crv", crv: 2 },
+    });
+    expect(formReducer(usd, patch({ crvBasis: "btc" }))).toEqual(btc);
+  });
+
+  it("TP target: switching the basis keeps the typed TP", () => {
+    const user = tpModeTrade("long", "108000", "105500", "115000");
+    const { final, tps } = tpTrace(user, [patch({ crvBasis: "usd" }), patch({ stop: "106000" }), patch({ crvBasis: "btc" })]);
+    expect(tps).toEqual(["115000", "115000", "115000"]);
+    expect(final.target).toEqual({ kind: "tp" });
+  });
+
+  it("a patch carrying tp together with the basis keeps the given tp", () => {
+    const state = formReducer(trade("long", "108000", "105500"), patch({ crvBasis: "usd", tp: "120000" }));
+    expect(state.inputs.tp).toBe("120000");
+    expect(state.target).toEqual({ kind: "tp" });
+  });
+
+  it("switching the basis before entry/stop are set leaves TP empty and keeps the target", () => {
+    const state = formReducer(INITIAL_FORM_STATE, patch({ crvBasis: "usd" }));
+    expect(state).toEqual({ inputs: { ...DEFAULT_INPUTS, crvBasis: "usd" }, target: { kind: "crv", crv: 2 } });
+  });
+
+  it("spreadsheet examples: long 90000/80000 2 R -> 110000, 2,5 R -> 115000; short 108000/110500 2 R -> 103000", () => {
+    expect(usdTrade("long", "90000", "80000").inputs.tp).toBe("110000");
+    expect(formReducer(usdTrade("long", "90000", "80000"), setCrv(2.5)).inputs.tp).toBe("115000");
+    expect(usdTrade("short", "108000", "110500").inputs.tp).toBe("103000");
+  });
+
+  it("CRV 3 sets 115500 and a stop change recomputes linearly (106000 -> 114000)", () => {
+    const crv3 = formReducer(usdTrade("long", "108000", "105500"), setCrv(3));
+    expect(crv3.inputs.tp).toBe("115500");
+    expect(crv3.target).toEqual({ kind: "crv", crv: 3 });
+    expect(formReducer(crv3, patch({ stop: "106000" })).inputs.tp).toBe("114000");
+  });
+
+  it("long has no bound: CRV 50 gives 233000; in the btc basis (bound 42.2) TP empties, the target stays", () => {
+    const crv50 = formReducer(usdTrade("long", "108000", "105500"), setCrv(50));
+    expect(crv50.inputs.tp).toBe("233000");
+    expect(crv50.target).toEqual({ kind: "crv", crv: 50 });
+
+    const { final, tps } = tpTrace(crv50, [patch({ crvBasis: "btc" }), patch({ crvBasis: "usd" })]);
+    expect(tps).toEqual(["", "233000"]);
+    expect(final.target).toEqual({ kind: "crv", crv: 50 });
+  });
+
+  it("short is bounded by entry / (stop − entry): 43.2 for 108000/110500", () => {
+    const short = usdTrade("short", "108000", "110500");
+    expect(formReducer(short, setCrv(43.2))).toBe(short);
+    expect(formReducer(short, setCrv(50))).toBe(short);
+    // 108000 − 43 · 2500
+    expect(formReducer(short, setCrv(43)).inputs.tp).toBe("500");
+  });
+
+  it("tpInputForCrv usd: linear prices on the tick", () => {
+    const usd = { crvBasis: "usd" as const };
+    expect(tpInputForCrv({ ...usd, direction: "long", entry: "90000", stop: "80000" }, 2)).toBe("110000");
+    expect(tpInputForCrv({ ...usd, direction: "long", entry: "108000", stop: "105500" }, 2)).toBe("113000");
+    expect(tpInputForCrv({ ...usd, direction: "short", entry: "108000", stop: "110500" }, 2)).toBe("103000");
+    // 81005.9 + 1.921919 · 1800.7 = 84466.6995…
+    expect(tpInputForCrv({ ...usd, direction: "long", entry: "81005.9", stop: "79205.2" }, 1.921919)).toBe("84466.7");
+    expect(tpInputForCrv({ ...usd, direction: "short", entry: "108000", stop: "110500" }, 43.2)).toBeNull();
+    expect(tpInputForCrv({ ...usd, direction: "long", entry: "108000", stop: "110500" }, 2)).toBeNull();
+  });
+
+  it("tpInputForCrvText usd: short above the bound shows max 43,20 R, long is unbounded", () => {
+    const short = { crvBasis: "usd" as const, direction: "short" as const, entry: "108000", stop: "110500" };
+    const long = { crvBasis: "usd" as const, direction: "long" as const, entry: "108000", stop: "105500" };
+    expect(tpInputForCrvText(short, "50")).toEqual({ error: crvUnreachableText(43.2) });
+    expect(tpInputForCrvText(short, "43,2")).toEqual({ error: crvUnreachableText(43.2) });
+    expect(crvUnreachableText(43.2)).toBe("CRV nicht erreichbar – max. 43,20 R bei diesem Stop.");
+    expect(tpInputForCrvText(short, "43")).toEqual({ tp: "500" });
+    expect(tpInputForCrvText(long, "50")).toEqual({ tp: "233000" });
+    expect(tpInputForCrvText(long, "2,5")).toEqual({ tp: "114250" });
+  });
+
+  it("tpInputForCrvText usd: a price rounding onto entry has no tick (short 0.3/0.31, 1 R)", () => {
+    const inputs = { crvBasis: "usd" as const, direction: "short" as const, entry: "0.3", stop: "0.31" };
+    expect(tpInputForCrvText(inputs, "1")).toEqual({ error: TEXT_CRV_OFF_TICK });
+    expect(tpInputForCrvText(inputs, "10")).toEqual({ tp: "0.2" });
   });
 });

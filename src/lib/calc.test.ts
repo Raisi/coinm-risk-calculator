@@ -3,7 +3,7 @@ import {
   approxPositionUsd,
   crvFromPrices,
   gainPerUsd,
-  grossRiskBtc,
+  grossRisk,
   liquidationFactor,
   liquidationPrice,
   liquidationPriceLong,
@@ -12,7 +12,7 @@ import {
   MAX_LEVERAGE,
   maxLeverageForFactor,
   maxReachableCrv,
-  netRiskBtc,
+  netRisk,
   positionSize,
   tpForCrv,
   tpOnTickForCrv,
@@ -41,22 +41,28 @@ const MMR = 0.004;
 
 describe("risk budget", () => {
   it("pct mode takes riskPct % of the balance (Fall A: 5 %)", () => {
-    expectRel(grossRiskBtc("pct", BALANCE, 5, 0), 0.000362673, 1e-9);
+    expectRel(grossRisk("pct", BALANCE, 5, 0), 0.000362673, 1e-9);
   });
 
-  it("btc mode uses the BTC input and ignores balance and pct", () => {
-    expect(grossRiskBtc("btc", BALANCE, 5, 0.00035)).toBe(0.00035);
+  it("amount mode uses the fixed amount and ignores balance and pct", () => {
+    expect(grossRisk("amount", BALANCE, 5, 0.00035)).toBe(0.00035);
+  });
+
+  it("is unit-agnostic: a USDT balance of 1000 at 1 % gives 10 USDT, a fixed 25 USDT stays 25", () => {
+    expect(grossRisk("pct", 1000, 1, 0)).toBe(10);
+    expect(grossRisk("amount", 1000, 1, 25)).toBe(25);
+    expect(netRisk(10, 20)).toBe(8);
   });
 
   it("buffer reserves bufferPct % for fees/slippage", () => {
-    expectRel(netRiskBtc(0.001, 5), 0.00095, 1e-12);
-    expect(netRiskBtc(0.001, 0)).toBe(0.001);
+    expectRel(netRisk(0.001, 5), 0.00095, 1e-12);
+    expect(netRisk(0.001, 0)).toBe(0.001);
   });
 });
 
 describe("position sizing (inverse contracts)", () => {
   it("Fall A: 5 % risk -> N_usd, N_btc, margin at 30x and 10x, gain, CRV, eff. leverage", () => {
-    const risk = grossRiskBtc("pct", BALANCE, 5, 0);
+    const risk = grossRisk("pct", BALANCE, 5, 0);
     const at30 = positionSize("long", risk, ENTRY, STOP, 30);
     const at10 = positionSize("long", risk, ENTRY, STOP, 10);
 
@@ -75,7 +81,7 @@ describe("position sizing (inverse contracts)", () => {
   });
 
   it("Fall B: 0.00035 BTC risk -> N_usd, N_btc, margin at 30x and 10x, gain, CRV, eff. leverage", () => {
-    const risk = grossRiskBtc("btc", BALANCE, 0, 0.00035);
+    const risk = grossRisk("amount", BALANCE, 0, 0.00035);
     const at30 = positionSize("long", risk, ENTRY, STOP, 30);
     const at10 = positionSize("long", risk, ENTRY, STOP, 10);
 
@@ -267,34 +273,34 @@ describe("tpForCrv", () => {
   }
 
   it.each(CRVS)("long round trip: CRV(entry, stop, tpForCrv(R)) ≈ R for R = %s", (r) => {
-    const tp = tpForCrv("long", ENTRY, STOP, r);
+    const tp = tpForCrv("btc", "long", ENTRY, STOP, r);
     expect(tp).not.toBeNull();
     expect(Number.isFinite(tp!)).toBe(true);
     expectRel(crvOf("long", ENTRY, STOP, tp!), r, 1e-9);
   });
 
   it.each(CRVS)("short round trip: CRV(entry, stop, tpForCrv(R)) ≈ R for R = %s", (r) => {
-    const tp = tpForCrv("short", ENTRY, SHORT_STOP, r);
+    const tp = tpForCrv("btc", "short", ENTRY, SHORT_STOP, r);
     expect(tp).not.toBeNull();
     expect(Number.isFinite(tp!)).toBe(true);
     expectRel(crvOf("short", ENTRY, SHORT_STOP, tp!), r, 1e-9);
   });
 
   it("Fall A long 81005.9 / 79205.2 with R = 1.921919 gives TP ≈ 84707.1", () => {
-    expectRel(tpForCrv("long", ENTRY, STOP, 1.921919)!, TP, 1e-6);
+    expectRel(tpForCrv("btc", "long", ENTRY, STOP, 1.921919)!, TP, 1e-6);
   });
 
   it.each(CRVS)("TP lies beyond entry on the profit side (R = %s)", (r) => {
-    const longTp = tpForCrv("long", ENTRY, STOP, r)!;
-    const shortTp = tpForCrv("short", ENTRY, SHORT_STOP, r)!;
+    const longTp = tpForCrv("btc", "long", ENTRY, STOP, r)!;
+    const shortTp = tpForCrv("btc", "short", ENTRY, SHORT_STOP, r)!;
     expect(longTp).toBeGreaterThan(ENTRY);
     expect(shortTp).toBeLessThan(ENTRY);
     expect(shortTp).toBeGreaterThan(0);
   });
 
   it("TP moves further from entry as R grows", () => {
-    const longs = CRVS.map((r) => tpForCrv("long", ENTRY, STOP, r)!);
-    const shorts = CRVS.map((r) => tpForCrv("short", ENTRY, SHORT_STOP, r)!);
+    const longs = CRVS.map((r) => tpForCrv("btc", "long", ENTRY, STOP, r)!);
+    const shorts = CRVS.map((r) => tpForCrv("btc", "short", ENTRY, SHORT_STOP, r)!);
     for (let i = 1; i < CRVS.length; i++) {
       expect(longs[i]).toBeGreaterThan(longs[i - 1]);
       expect(shorts[i]).toBeLessThan(shorts[i - 1]);
@@ -302,14 +308,14 @@ describe("tpForCrv", () => {
   });
 
   it("long is infeasible for R >= stop / (entry - stop): entry 100, stop 50 (bound 1)", () => {
-    expect(tpForCrv("long", 100, 50, 1)).toBeNull();
-    expect(tpForCrv("long", 100, 50, 2)).toBeNull();
-    expect(tpForCrv("long", 100, 50, 1000)).toBeNull();
+    expect(tpForCrv("btc", "long", 100, 50, 1)).toBeNull();
+    expect(tpForCrv("btc", "long", 100, 50, 2)).toBeNull();
+    expect(tpForCrv("btc", "long", 100, 50, 1000)).toBeNull();
   });
 
   it("long just below the feasibility bound returns a finite TP with the target CRV", () => {
     const r = 0.999;
-    const tp = tpForCrv("long", 100, 50, r);
+    const tp = tpForCrv("btc", "long", 100, 50, r);
     expect(tp).not.toBeNull();
     expect(Number.isFinite(tp!)).toBe(true);
     expect(tp!).toBeGreaterThan(100);
@@ -318,16 +324,16 @@ describe("tpForCrv", () => {
 
   it("Fall A long: just below the bound is finite, at/above the bound is null", () => {
     const bound = STOP / (ENTRY - STOP);
-    const below = tpForCrv("long", ENTRY, STOP, bound * (1 - 1e-6));
+    const below = tpForCrv("btc", "long", ENTRY, STOP, bound * (1 - 1e-6));
     expect(below).not.toBeNull();
     expect(Number.isFinite(below!)).toBe(true);
     expect(below!).toBeGreaterThan(ENTRY);
-    expect(tpForCrv("long", ENTRY, STOP, bound * (1 + 1e-6))).toBeNull();
-    expect(tpForCrv("long", ENTRY, STOP, bound * 2)).toBeNull();
+    expect(tpForCrv("btc", "long", ENTRY, STOP, bound * (1 + 1e-6))).toBeNull();
+    expect(tpForCrv("btc", "long", ENTRY, STOP, bound * 2)).toBeNull();
   });
 
   it("short stays feasible for very large R (TP approaches 0 from above)", () => {
-    const tp = tpForCrv("short", 100, 150, 1e6);
+    const tp = tpForCrv("btc", "short", 100, 150, 1e6);
     expect(tp).not.toBeNull();
     expect(tp!).toBeGreaterThan(0);
     expect(tp!).toBeLessThan(100);
@@ -335,19 +341,19 @@ describe("tpForCrv", () => {
   });
 
   it.each([0, -1, -0.5, NaN, Infinity, -Infinity])("returns null for R = %s", (r) => {
-    expect(tpForCrv("long", ENTRY, STOP, r)).toBeNull();
-    expect(tpForCrv("short", ENTRY, SHORT_STOP, r)).toBeNull();
+    expect(tpForCrv("btc", "long", ENTRY, STOP, r)).toBeNull();
+    expect(tpForCrv("btc", "short", ENTRY, SHORT_STOP, r)).toBeNull();
   });
 
   it("returns null when the stop equals entry", () => {
-    expect(tpForCrv("long", ENTRY, ENTRY, 2)).toBeNull();
-    expect(tpForCrv("short", ENTRY, ENTRY, 2)).toBeNull();
+    expect(tpForCrv("btc", "long", ENTRY, ENTRY, 2)).toBeNull();
+    expect(tpForCrv("btc", "short", ENTRY, ENTRY, 2)).toBeNull();
   });
 
   it("returns null when the stop is on the wrong side of entry", () => {
     // Long stop above entry, short stop below entry.
-    expect(tpForCrv("long", ENTRY, SHORT_STOP, 2)).toBeNull();
-    expect(tpForCrv("short", ENTRY, STOP, 2)).toBeNull();
+    expect(tpForCrv("btc", "long", ENTRY, SHORT_STOP, 2)).toBeNull();
+    expect(tpForCrv("btc", "short", ENTRY, STOP, 2)).toBeNull();
   });
 
   it.each([
@@ -360,12 +366,12 @@ describe("tpForCrv", () => {
     [NaN, 50],
     [100, NaN],
   ])("returns null for non-positive or non-numeric entry/stop (entry %s, stop %s)", (entry, stop) => {
-    expect(tpForCrv("long", entry, stop, 1)).toBeNull();
-    expect(tpForCrv("short", entry, stop, 1)).toBeNull();
+    expect(tpForCrv("btc", "long", entry, stop, 1)).toBeNull();
+    expect(tpForCrv("btc", "short", entry, stop, 1)).toBeNull();
   });
 
   it("returns null for short with negative entry and stop that only look ordered", () => {
-    expect(tpForCrv("short", -150, -100, 1)).toBeNull();
+    expect(tpForCrv("btc", "short", -150, -100, 1)).toBeNull();
   });
 });
 
@@ -378,7 +384,7 @@ describe("tpForCrv exact long feasibility bound", () => {
     [108000, 105500, 42.2],
   ])("long entry %s, stop %s: R = %s (the bound) is null", (entry, stop, bound) => {
     expect(stop / (entry - stop)).toBe(bound);
-    expect(tpForCrv("long", entry, stop, bound)).toBeNull();
+    expect(tpForCrv("btc", "long", entry, stop, bound)).toBeNull();
   });
 
   it.each([
@@ -387,11 +393,11 @@ describe("tpForCrv exact long feasibility bound", () => {
     [108000, 105500, 42.2],
   ])("long entry %s, stop %s: R just below %s is a finite TP beyond entry", (entry, stop, bound) => {
     const r = bound * (1 - 1e-4);
-    const tp = tpForCrv("long", entry, stop, r);
+    const tp = tpForCrv("btc", "long", entry, stop, r);
     expect(tp).not.toBeNull();
     expect(Number.isFinite(tp!)).toBe(true);
     expect(tp!).toBeGreaterThan(entry);
-    expectRel(crvFromPrices("long", entry, stop, tp!)!, r, 1e-6);
+    expectRel(crvFromPrices("btc", "long", entry, stop, tp!)!, r, 1e-6);
   });
 });
 
@@ -403,11 +409,11 @@ describe("maxReachableCrv", () => {
     [100000, 80000, 4],
     [100100, 100000, 1000],
   ])("long entry %s, stop %s: bound is %s", (entry, stop, bound) => {
-    expect(maxReachableCrv("long", entry, stop)).toBe(bound);
+    expect(maxReachableCrv("btc", "long", entry, stop)).toBe(bound);
   });
 
   it("long 100/70 is 2.333…", () => {
-    expect(maxReachableCrv("long", 100, 70)).toBeCloseTo(2.3333333333, 9);
+    expect(maxReachableCrv("btc", "long", 100, 70)).toBeCloseTo(2.3333333333, 9);
   });
 
   it.each([
@@ -415,7 +421,7 @@ describe("maxReachableCrv", () => {
     [100, 150],
     [0.1, 1],
   ])("short entry %s, stop %s: unbounded (null)", (entry, stop) => {
-    expect(maxReachableCrv("short", entry, stop)).toBeNull();
+    expect(maxReachableCrv("btc", "short", entry, stop)).toBeNull();
   });
 
   it.each([
@@ -432,22 +438,22 @@ describe("maxReachableCrv", () => {
     ["short", 108000, 105500],
     ["short", -150, -100],
   ] as const)("%s entry %s, stop %s: unusable stop gives null", (direction, entry, stop) => {
-    expect(maxReachableCrv(direction, entry, stop)).toBeNull();
+    expect(maxReachableCrv("btc", direction, entry, stop)).toBeNull();
   });
 
   it("tpForCrv: below the bound gives a TP, exactly at and above it gives null (long 100/70)", () => {
     // Exact: 1 / (1/100 − 2.3 · (1/70 − 1/100)) = 7000.
-    expect(tpForCrv("long", 100, 70, 2.3)).toBeCloseTo(7000, 6);
-    expect(tpForCrv("long", 100, 70, 70 / 30)).toBeNull();
-    expect(tpForCrv("long", 100, 70, 2.34)).toBeNull();
-    expect(tpOnTickForCrv("long", 100, 70, 70 / 30, 1)).toBeNull();
+    expect(tpForCrv("btc", "long", 100, 70, 2.3)).toBeCloseTo(7000, 6);
+    expect(tpForCrv("btc", "long", 100, 70, 70 / 30)).toBeNull();
+    expect(tpForCrv("btc", "long", 100, 70, 2.34)).toBeNull();
+    expect(tpOnTickForCrv("btc", "long", 100, 70, 70 / 30, 1)).toBeNull();
   });
 
   it("tpForCrv: exactly at the bound 42.2 is null, just below is finite (long 108000/105500)", () => {
-    expect(tpForCrv("long", 108000, 105500, 42.2)).toBeNull();
-    expect(tpOnTickForCrv("long", 108000, 105500, 42.2, 1)).toBeNull();
+    expect(tpForCrv("btc", "long", 108000, 105500, 42.2)).toBeNull();
+    expect(tpOnTickForCrv("btc", "long", 108000, 105500, 42.2, 1)).toBeNull();
     // Exact: 105500 · 108000 / (105500 − 42.19 · 2500) = 455760000.
-    expect(tpForCrv("long", 108000, 105500, 42.19)).toBeCloseTo(455760000, 0);
+    expect(tpForCrv("btc", "long", 108000, 105500, 42.19)).toBeCloseTo(455760000, 0);
   });
 });
 
@@ -461,8 +467,8 @@ describe("validLossPerUsd", () => {
   it("is null when a stop next to entry cancels the loss to 0 (long 13 / 12.999999999999998)", () => {
     expect(12.999999999999998).toBeLessThan(13);
     expect(validLossPerUsd("long", 13, 12.999999999999998)).toBeNull();
-    expect(tpForCrv("long", 13, 12.999999999999998, 1)).toBeNull();
-    expect(crvFromPrices("long", 13, 12.999999999999998, 14)).toBeNull();
+    expect(tpForCrv("btc", "long", 13, 12.999999999999998, 1)).toBeNull();
+    expect(crvFromPrices("btc", "long", 13, 12.999999999999998, 14)).toBeNull();
   });
 
   it("is null for a stop on the wrong side of entry or equal to entry", () => {
@@ -493,38 +499,38 @@ describe("crvFromPrices", () => {
 
   it("is gainPerUsd / lossPerUsd for a long", () => {
     const expected = gainPerUsd("long", ENTRY, TP) / lossPerUsd("long", ENTRY, STOP);
-    expect(crvFromPrices("long", ENTRY, STOP, TP)).toBe(expected);
-    expectRel(crvFromPrices("long", ENTRY, STOP, TP)!, 1.921919, 1e-6);
+    expect(crvFromPrices("btc", "long", ENTRY, STOP, TP)).toBe(expected);
+    expectRel(crvFromPrices("btc", "long", ENTRY, STOP, TP)!, 1.921919, 1e-6);
   });
 
   it("is gainPerUsd / lossPerUsd for a short", () => {
     const expected = gainPerUsd("short", ENTRY, SHORT_TP) / lossPerUsd("short", ENTRY, SHORT_STOP);
-    expect(crvFromPrices("short", ENTRY, SHORT_STOP, SHORT_TP)).toBe(expected);
+    expect(crvFromPrices("btc", "short", ENTRY, SHORT_STOP, SHORT_TP)).toBe(expected);
     expect(expected).toBeGreaterThan(0);
   });
 
   it("is null for a stop on the wrong side of entry or equal to entry", () => {
-    expect(crvFromPrices("long", ENTRY, SHORT_STOP, TP)).toBeNull();
-    expect(crvFromPrices("short", ENTRY, STOP, SHORT_TP)).toBeNull();
-    expect(crvFromPrices("long", ENTRY, ENTRY, TP)).toBeNull();
-    expect(crvFromPrices("short", ENTRY, ENTRY, SHORT_TP)).toBeNull();
+    expect(crvFromPrices("btc", "long", ENTRY, SHORT_STOP, TP)).toBeNull();
+    expect(crvFromPrices("btc", "short", ENTRY, STOP, SHORT_TP)).toBeNull();
+    expect(crvFromPrices("btc", "long", ENTRY, ENTRY, TP)).toBeNull();
+    expect(crvFromPrices("btc", "short", ENTRY, ENTRY, SHORT_TP)).toBeNull();
   });
 
   it("is null for a TP on the wrong side of entry or equal to entry", () => {
-    expect(crvFromPrices("long", ENTRY, STOP, SHORT_TP)).toBeNull();
-    expect(crvFromPrices("short", ENTRY, SHORT_STOP, TP)).toBeNull();
-    expect(crvFromPrices("long", ENTRY, STOP, ENTRY)).toBeNull();
-    expect(crvFromPrices("short", ENTRY, SHORT_STOP, ENTRY)).toBeNull();
+    expect(crvFromPrices("btc", "long", ENTRY, STOP, SHORT_TP)).toBeNull();
+    expect(crvFromPrices("btc", "short", ENTRY, SHORT_STOP, TP)).toBeNull();
+    expect(crvFromPrices("btc", "long", ENTRY, STOP, ENTRY)).toBeNull();
+    expect(crvFromPrices("btc", "short", ENTRY, SHORT_STOP, ENTRY)).toBeNull();
   });
 
   it.each([0, -1, -84707.1, NaN, -Infinity])("is null for TP %s", (tp) => {
-    expect(crvFromPrices("long", ENTRY, STOP, tp)).toBeNull();
-    expect(crvFromPrices("short", ENTRY, SHORT_STOP, tp)).toBeNull();
+    expect(crvFromPrices("btc", "long", ENTRY, STOP, tp)).toBeNull();
+    expect(crvFromPrices("btc", "short", ENTRY, SHORT_STOP, tp)).toBeNull();
   });
 
   it("is null for an infinite TP (documented: `tp` must be a finite price beyond entry)", () => {
-    expect(crvFromPrices("short", ENTRY, SHORT_STOP, Infinity)).toBeNull();
-    expect(crvFromPrices("long", ENTRY, STOP, Infinity)).toBeNull();
+    expect(crvFromPrices("btc", "short", ENTRY, SHORT_STOP, Infinity)).toBeNull();
+    expect(crvFromPrices("btc", "long", ENTRY, STOP, Infinity)).toBeNull();
   });
 
   it.each([
@@ -536,15 +542,15 @@ describe("crvFromPrices", () => {
     [NaN, 50],
     [100, Infinity],
   ])("is null for non-positive or non-finite entry/stop (entry %s, stop %s)", (entry, stop) => {
-    expect(crvFromPrices("long", entry, stop, 200)).toBeNull();
-    expect(crvFromPrices("short", entry, stop, 25)).toBeNull();
+    expect(crvFromPrices("btc", "long", entry, stop, 200)).toBeNull();
+    expect(crvFromPrices("btc", "short", entry, stop, 25)).toBeNull();
   });
 
   it.each([0.25, 1, 1.921919, 3, 7.5])("round trips with tpForCrv for R = %s (long and short)", (r) => {
-    const longTp = tpForCrv("long", ENTRY, STOP, r)!;
-    const shortTp = tpForCrv("short", ENTRY, SHORT_STOP, r)!;
-    expectRel(crvFromPrices("long", ENTRY, STOP, longTp)!, r, 1e-9);
-    expectRel(crvFromPrices("short", ENTRY, SHORT_STOP, shortTp)!, r, 1e-9);
+    const longTp = tpForCrv("btc", "long", ENTRY, STOP, r)!;
+    const shortTp = tpForCrv("btc", "short", ENTRY, SHORT_STOP, r)!;
+    expectRel(crvFromPrices("btc", "long", ENTRY, STOP, longTp)!, r, 1e-9);
+    expectRel(crvFromPrices("btc", "short", ENTRY, SHORT_STOP, shortTp)!, r, 1e-9);
   });
 });
 
@@ -565,14 +571,14 @@ describe("tpOnTickForCrv", () => {
   }
 
   it.each(CRVS)("long R = %s: on the 0.1 tick and above entry", (r) => {
-    const tp = tpOnTickForCrv("long", ENTRY, STOP, r, 1);
+    const tp = tpOnTickForCrv("btc", "long", ENTRY, STOP, r, 1);
     expect(tp).not.toBeNull();
     expect(onTenthTick(tp!), `${tp} on 0.1 tick`).toBe(true);
     expect(tp!).toBeGreaterThan(ENTRY);
   });
 
   it.each(CRVS)("short R = %s: on the 0.1 tick, below entry and positive", (r) => {
-    const tp = tpOnTickForCrv("short", ENTRY, SHORT_STOP, r, 1);
+    const tp = tpOnTickForCrv("btc", "short", ENTRY, SHORT_STOP, r, 1);
     expect(tp).not.toBeNull();
     expect(onTenthTick(tp!), `${tp} on 0.1 tick`).toBe(true);
     expect(tp!).toBeLessThan(ENTRY);
@@ -580,10 +586,10 @@ describe("tpOnTickForCrv", () => {
   });
 
   it.each(CRVS)("R = %s: equals tpForCrv rounded to the nearest 0.1 tick (long and short)", (r) => {
-    const longExact = tpForCrv("long", ENTRY, STOP, r)!;
-    const shortExact = tpForCrv("short", ENTRY, SHORT_STOP, r)!;
-    const longTick = tpOnTickForCrv("long", ENTRY, STOP, r, 1)!;
-    const shortTick = tpOnTickForCrv("short", ENTRY, SHORT_STOP, r, 1)!;
+    const longExact = tpForCrv("btc", "long", ENTRY, STOP, r)!;
+    const shortExact = tpForCrv("btc", "short", ENTRY, SHORT_STOP, r)!;
+    const longTick = tpOnTickForCrv("btc", "long", ENTRY, STOP, r, 1)!;
+    const shortTick = tpOnTickForCrv("btc", "short", ENTRY, SHORT_STOP, r, 1)!;
     expect(longTick).toBe(Math.round(longExact * 10) / 10);
     expect(shortTick).toBe(Math.round(shortExact * 10) / 10);
     // Nearest tick: never more than half a tick away from the exact price.
@@ -592,17 +598,17 @@ describe("tpOnTickForCrv", () => {
   });
 
   it("examples: Fall A 1.921919 -> 84707.1, long 108000 / 105500 R 3 -> 116265.3, short 108000 / 110500 R 2 -> 103324.7", () => {
-    expect(tpOnTickForCrv("long", ENTRY, STOP, 1.921919, 1)).toBe(84707.1);
-    expect(tpOnTickForCrv("long", 108000, 105500, 3, 1)).toBe(116265.3);
-    expect(tpOnTickForCrv("short", 108000, 110500, 2, 1)).toBe(103324.7);
+    expect(tpOnTickForCrv("btc", "long", ENTRY, STOP, 1.921919, 1)).toBe(84707.1);
+    expect(tpOnTickForCrv("btc", "long", 108000, 105500, 3, 1)).toBe(116265.3);
+    expect(tpOnTickForCrv("btc", "short", 108000, 110500, 2, 1)).toBe(103324.7);
   });
 
   it("long 100 / 60 with R 1.5 (exactly the feasibility bound) is null", () => {
-    expect(tpOnTickForCrv("long", 100, 60, 1.5, 1)).toBeNull();
+    expect(tpOnTickForCrv("btc", "long", 100, 60, 1.5, 1)).toBeNull();
   });
 
   it("is deterministic: the same arguments always give the same result", () => {
-    const cases: [Parameters<typeof tpOnTickForCrv>[0], number, number][] = [
+    const cases: [Parameters<typeof tpOnTickForCrv>[1], number, number][] = [
       ["long", ENTRY, STOP],
       ["short", ENTRY, SHORT_STOP],
       ["long", 108000, 107999.9],
@@ -610,18 +616,18 @@ describe("tpOnTickForCrv", () => {
     ];
     for (const [direction, entry, stop] of cases) {
       for (const r of [0.01, 1.1, 1.4, 1.921919, 3]) {
-        const first = tpOnTickForCrv(direction, entry, stop, r, 1);
+        const first = tpOnTickForCrv("btc", direction, entry, stop, r, 1);
         // Interleave other calls (different targets, other direction) before repeating.
-        tpOnTickForCrv(direction, entry, stop, r + 0.7, 1);
-        tpOnTickForCrv(direction === "long" ? "short" : "long", ENTRY, direction === "long" ? SHORT_STOP : STOP, r, 1);
-        expect(tpOnTickForCrv(direction, entry, stop, r, 1)).toBe(first);
-        expect(tpOnTickForCrv(direction, entry, stop, r, 1)).toBe(first);
+        tpOnTickForCrv("btc", direction, entry, stop, r + 0.7, 1);
+        tpOnTickForCrv("btc", direction === "long" ? "short" : "long", ENTRY, direction === "long" ? SHORT_STOP : STOP, r, 1);
+        expect(tpOnTickForCrv("btc", direction, entry, stop, r, 1)).toBe(first);
+        expect(tpOnTickForCrv("btc", direction, entry, stop, r, 1)).toBe(first);
       }
     }
   });
 
   it("long: TP is non-decreasing as the target grows (Fall A, 0.1 .. 10)", () => {
-    const tps = targets(0.1, 10).map((r) => tpOnTickForCrv("long", ENTRY, STOP, r, 1));
+    const tps = targets(0.1, 10).map((r) => tpOnTickForCrv("btc", "long", ENTRY, STOP, r, 1));
     for (let i = 1; i < tps.length; i++) {
       expect(tps[i]).not.toBeNull();
       expect(tps[i]!).toBeGreaterThanOrEqual(tps[i - 1]!);
@@ -629,7 +635,7 @@ describe("tpOnTickForCrv", () => {
   });
 
   it("short: TP is non-increasing as the target grows (Fall A mirror, 0.1 .. 10)", () => {
-    const tps = targets(0.1, 10).map((r) => tpOnTickForCrv("short", ENTRY, SHORT_STOP, r, 1));
+    const tps = targets(0.1, 10).map((r) => tpOnTickForCrv("btc", "short", ENTRY, SHORT_STOP, r, 1));
     for (let i = 1; i < tps.length; i++) {
       expect(tps[i]).not.toBeNull();
       expect(tps[i]!).toBeLessThanOrEqual(tps[i - 1]!);
@@ -637,45 +643,176 @@ describe("tpOnTickForCrv", () => {
   });
 
   it("tight-stop long 108000 / 107999.9: non-decreasing over 1 .. 30, targets 1.1 .. 1.4 all give 108000.1", () => {
-    const tps = targets(1, 30).map((r) => tpOnTickForCrv("long", 108000, 107999.9, r, 1));
+    const tps = targets(1, 30).map((r) => tpOnTickForCrv("btc", "long", 108000, 107999.9, r, 1));
     for (let i = 1; i < tps.length; i++) {
       expect(tps[i]).not.toBeNull();
       expect(onTenthTick(tps[i]!)).toBe(true);
       expect(tps[i]!).toBeGreaterThanOrEqual(tps[i - 1]!);
     }
     for (const r of [1.1, 1.2, 1.3, 1.4]) {
-      expect(tpOnTickForCrv("long", 108000, 107999.9, r, 1), `R ${r}`).toBe(108000.1);
+      expect(tpOnTickForCrv("btc", "long", 108000, 107999.9, r, 1), `R ${r}`).toBe(108000.1);
     }
   });
 
   it("tight-stop short 108000 / 108000.1: non-increasing over 1 .. 30, targets 1.1 .. 1.4 all give 107999.9", () => {
-    const tps = targets(1, 30).map((r) => tpOnTickForCrv("short", 108000, 108000.1, r, 1));
+    const tps = targets(1, 30).map((r) => tpOnTickForCrv("btc", "short", 108000, 108000.1, r, 1));
     for (let i = 1; i < tps.length; i++) {
       expect(tps[i]).not.toBeNull();
       expect(onTenthTick(tps[i]!)).toBe(true);
       expect(tps[i]!).toBeLessThanOrEqual(tps[i - 1]!);
     }
     for (const r of [1.1, 1.2, 1.3, 1.4]) {
-      expect(tpOnTickForCrv("short", 108000, 108000.1, r, 1), `R ${r}`).toBe(107999.9);
+      expect(tpOnTickForCrv("btc", "short", 108000, 108000.1, r, 1), `R ${r}`).toBe(107999.9);
     }
   });
 
   it("is null when tpForCrv is infeasible", () => {
-    expect(tpOnTickForCrv("long", 100000, 80000, 4, 1)).toBeNull();
-    expect(tpOnTickForCrv("long", 100, 50, 2, 1)).toBeNull();
-    expect(tpOnTickForCrv("long", ENTRY, ENTRY, 1, 1)).toBeNull();
-    expect(tpOnTickForCrv("short", ENTRY, STOP, 1, 1)).toBeNull();
-    expect(tpOnTickForCrv("long", 13, 12.999999999999998, 1, 1)).toBeNull();
-    expect(tpOnTickForCrv("long", ENTRY, STOP, 0, 1)).toBeNull();
-    expect(tpOnTickForCrv("long", ENTRY, STOP, NaN, 1)).toBeNull();
-    expect(tpOnTickForCrv("short", ENTRY, SHORT_STOP, -1, 1)).toBeNull();
+    expect(tpOnTickForCrv("btc", "long", 100000, 80000, 4, 1)).toBeNull();
+    expect(tpOnTickForCrv("btc", "long", 100, 50, 2, 1)).toBeNull();
+    expect(tpOnTickForCrv("btc", "long", ENTRY, ENTRY, 1, 1)).toBeNull();
+    expect(tpOnTickForCrv("btc", "short", ENTRY, STOP, 1, 1)).toBeNull();
+    expect(tpOnTickForCrv("btc", "long", 13, 12.999999999999998, 1, 1)).toBeNull();
+    expect(tpOnTickForCrv("btc", "long", ENTRY, STOP, 0, 1)).toBeNull();
+    expect(tpOnTickForCrv("btc", "long", ENTRY, STOP, NaN, 1)).toBeNull();
+    expect(tpOnTickForCrv("btc", "short", ENTRY, SHORT_STOP, -1, 1)).toBeNull();
   });
 
   it("is null when the rounded TP would land on entry", () => {
     // Exact TP ≈ 108000.001 rounds to entry itself, which is not beyond entry.
-    expect(tpForCrv("long", 108000, 107999.9, 0.01)).not.toBeNull();
-    expect(tpOnTickForCrv("long", 108000, 107999.9, 0.01, 1)).toBeNull();
-    expect(tpForCrv("short", 108000, 108000.1, 0.01)).not.toBeNull();
-    expect(tpOnTickForCrv("short", 108000, 108000.1, 0.01, 1)).toBeNull();
+    expect(tpForCrv("btc", "long", 108000, 107999.9, 0.01)).not.toBeNull();
+    expect(tpOnTickForCrv("btc", "long", 108000, 107999.9, 0.01, 1)).toBeNull();
+    expect(tpForCrv("btc", "short", 108000, 108000.1, 0.01)).not.toBeNull();
+    expect(tpOnTickForCrv("btc", "short", 108000, 108000.1, 0.01, 1)).toBeNull();
+  });
+});
+
+describe("CRV basis usd (linear R = |tp − entry| / |entry − stop|)", () => {
+  it("crvFromPrices: spreadsheet examples (long 90000/80000, long 108000/105500, short 108000/110500)", () => {
+    expect(crvFromPrices("usd", "long", 90000, 80000, 110000)).toBe(2);
+    expect(crvFromPrices("usd", "long", 90000, 80000, 115000)).toBe(2.5);
+    expect(crvFromPrices("usd", "long", 108000, 105500, 113000)).toBe(2);
+    expect(crvFromPrices("usd", "short", 108000, 110500, 103000)).toBe(2);
+  });
+
+  it("the same prices give a different CRV per basis (long 90000/80000, TP 120000: usd 3, btc 2)", () => {
+    expect(crvFromPrices("usd", "long", 90000, 80000, 120000)).toBe(3);
+    // btc: (1/90000 − 1/120000) / (1/80000 − 1/90000) = (1/360000) / (1/720000) = 2
+    expect(crvFromPrices("btc", "long", 90000, 80000, 120000)).toBeCloseTo(2, 12);
+  });
+
+  it("crvFromPrices usd is null for a TP on the wrong side, at entry, at/below 0 or not finite", () => {
+    expect(crvFromPrices("usd", "long", 90000, 80000, 85000)).toBeNull();
+    expect(crvFromPrices("usd", "long", 90000, 80000, 90000)).toBeNull();
+    expect(crvFromPrices("usd", "long", 90000, 80000, Infinity)).toBeNull();
+    expect(crvFromPrices("usd", "short", 108000, 110500, 109000)).toBeNull();
+    expect(crvFromPrices("usd", "short", 108000, 110500, 108000)).toBeNull();
+    expect(crvFromPrices("usd", "short", 108000, 110500, 0)).toBeNull();
+    expect(crvFromPrices("usd", "short", 108000, 110500, -5000)).toBeNull();
+  });
+
+  it("crvFromPrices usd is null for an unusable stop (wrong side, at entry, loss cancelling to 0)", () => {
+    expect(crvFromPrices("usd", "long", 90000, 95000, 110000)).toBeNull();
+    expect(crvFromPrices("usd", "long", 90000, 90000, 110000)).toBeNull();
+    expect(crvFromPrices("usd", "short", 108000, 105500, 103000)).toBeNull();
+    expect(crvFromPrices("usd", "long", 13, 12.999999999999998, 14)).toBeNull();
+  });
+
+  it("tpForCrv usd: tp = entry + crv · (entry − stop) for both directions", () => {
+    expect(tpForCrv("usd", "long", 90000, 80000, 2)).toBe(110000);
+    expect(tpForCrv("usd", "long", 90000, 80000, 2.5)).toBe(115000);
+    expect(tpForCrv("usd", "long", 108000, 105500, 2)).toBe(113000);
+    expect(tpForCrv("usd", "short", 108000, 110500, 2)).toBe(103000);
+    expect(tpForCrv("usd", "short", 100, 150, 1.5)).toBe(25);
+  });
+
+  it("tpForCrv btc for the same trades keeps the inverse result (90000/80000 2R -> 120000)", () => {
+    // 1 / (1/90000 − 2 · (1/80000 − 1/90000)) = 720000 / 6
+    expect(tpForCrv("btc", "long", 90000, 80000, 2)).toBeCloseTo(120000, 6);
+    expect(tpOnTickForCrv("btc", "long", 90000, 80000, 2, 1)).toBe(120000);
+    expect(tpOnTickForCrv("btc", "long", 108000, 105500, 2, 1)).toBe(113373.1);
+  });
+
+  it("maxReachableCrv usd: a short is bounded by entry / (stop − entry), a long is unbounded", () => {
+    expect(maxReachableCrv("usd", "short", 108000, 110500)).toBe(43.2);
+    expect(maxReachableCrv("usd", "short", 100, 150)).toBe(2);
+    expect(maxReachableCrv("usd", "short", 90000, 100000)).toBe(9);
+    expect(maxReachableCrv("usd", "long", 108000, 105500)).toBeNull();
+    expect(maxReachableCrv("usd", "long", 100, 50)).toBeNull();
+  });
+
+  it("maxReachableCrv usd is null for an unusable stop", () => {
+    expect(maxReachableCrv("usd", "short", 108000, 105500)).toBeNull();
+    expect(maxReachableCrv("usd", "short", 108000, 108000)).toBeNull();
+    expect(maxReachableCrv("usd", "long", 108000, 110500)).toBeNull();
+    expect(maxReachableCrv("usd", "short", 0, 50)).toBeNull();
+  });
+
+  it("short usd: just below the bound 43.2 is a positive TP, at and above it null", () => {
+    // 108000 − 43 · 2500 = 500; 108000 − 43.19 · 2500 = 25.
+    expect(tpForCrv("usd", "short", 108000, 110500, 43)).toBe(500);
+    expect(tpForCrv("usd", "short", 108000, 110500, 43.19)).toBeCloseTo(25, 6);
+    expect(tpOnTickForCrv("usd", "short", 108000, 110500, 43.19, 1)).toBe(25);
+    expect(tpForCrv("usd", "short", 108000, 110500, 43.2)).toBeNull();
+    expect(tpForCrv("usd", "short", 108000, 110500, 50)).toBeNull();
+    expect(tpOnTickForCrv("usd", "short", 108000, 110500, 43.2, 1)).toBeNull();
+  });
+
+  it("short usd 100/150: bound 2 (TP would reach 0)", () => {
+    expect(tpForCrv("usd", "short", 100, 150, 1)).toBe(50);
+    expect(tpForCrv("usd", "short", 100, 150, 1.99)).toBeCloseTo(0.5, 9);
+    expect(tpForCrv("usd", "short", 100, 150, 2)).toBeNull();
+    expect(tpForCrv("usd", "short", 100, 150, 3)).toBeNull();
+  });
+
+  it("long usd has no bound where the btc basis has one (108000/105500, btc bound 42.2)", () => {
+    expect(tpForCrv("usd", "long", 108000, 105500, 42.2)).toBeCloseTo(213500, 6);
+    expect(tpForCrv("usd", "long", 108000, 105500, 1000)).toBe(2608000);
+    expect(tpOnTickForCrv("usd", "long", 108000, 105500, 1000, 1)).toBe(2608000);
+    expect(tpForCrv("btc", "long", 108000, 105500, 42.2)).toBeNull();
+    expect(tpForCrv("btc", "long", 108000, 105500, 1000)).toBeNull();
+  });
+
+  it("short btc stays unbounded while short usd is bounded (100/150, R 3)", () => {
+    // btc: 1 / (1/100 + 3 · (1/100 − 1/150)) = 1 / (1/100 + 1/100) = 50
+    expect(tpForCrv("btc", "short", 100, 150, 3)).toBeCloseTo(50, 9);
+    expect(tpForCrv("usd", "short", 100, 150, 3)).toBeNull();
+  });
+
+  it.each([0, -1, NaN, Infinity, -Infinity])("tpForCrv usd is null for R = %s", (r) => {
+    expect(tpForCrv("usd", "long", 90000, 80000, r)).toBeNull();
+    expect(tpForCrv("usd", "short", 108000, 110500, r)).toBeNull();
+  });
+
+  it("tpForCrv usd is null for an unusable stop, even with a non-zero linear distance", () => {
+    expect(tpForCrv("usd", "long", 90000, 95000, 2)).toBeNull();
+    expect(tpForCrv("usd", "long", 90000, 90000, 2)).toBeNull();
+    expect(tpForCrv("usd", "short", 108000, 105500, 2)).toBeNull();
+    expect(tpForCrv("usd", "long", 13, 12.999999999999998, 1)).toBeNull();
+    expect(tpForCrv("usd", "long", NaN, 80000, 1)).toBeNull();
+  });
+
+  it.each([0.25, 1, 1.921919, 3, 7.5])("usd round trip: crvFromPrices(tpForCrv(R)) ≈ R for R = %s", (r) => {
+    const longTp = tpForCrv("usd", "long", ENTRY, STOP, r)!;
+    const shortTp = tpForCrv("usd", "short", ENTRY, 82806.6, r)!;
+    expectRel(crvFromPrices("usd", "long", ENTRY, STOP, longTp)!, r, 1e-9);
+    expectRel(crvFromPrices("usd", "short", ENTRY, 82806.6, shortTp)!, r, 1e-9);
+  });
+
+  it("tpOnTickForCrv usd rounds to the nearest 0.1 tick like the btc basis", () => {
+    // 81005.9 + 1.921919 · 1800.7 = 84466.6995433
+    expect(tpOnTickForCrv("usd", "long", ENTRY, STOP, 1.921919, 1)).toBe(84466.7);
+    // 108000 + 0.3 · 2500 = 108750; 108000 − 0.33 · 2500 = 107175
+    expect(tpOnTickForCrv("usd", "long", 108000, 105500, 0.3, 1)).toBe(108750);
+    expect(tpOnTickForCrv("usd", "short", 108000, 110500, 0.33, 1)).toBe(107175);
+  });
+
+  it("tpOnTickForCrv usd is null when the rounded TP lands on entry", () => {
+    // 108000 + 0.01 · 0.1 = 108000.001 -> 108000 (entry); R 1 -> 108000.1
+    expect(tpForCrv("usd", "long", 108000, 107999.9, 0.01)).not.toBeNull();
+    expect(tpOnTickForCrv("usd", "long", 108000, 107999.9, 0.01, 1)).toBeNull();
+    expect(tpOnTickForCrv("usd", "long", 108000, 107999.9, 1, 1)).toBe(108000.1);
+    // Short 0.3/0.31: R 1 -> 0.29 rounds onto entry 0.3; R 10 -> 0.2
+    expect(tpOnTickForCrv("usd", "short", 0.3, 0.31, 1, 1)).toBeNull();
+    expect(tpOnTickForCrv("usd", "short", 0.3, 0.31, 10, 1)).toBe(0.2);
   });
 });

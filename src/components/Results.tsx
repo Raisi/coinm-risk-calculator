@@ -4,8 +4,10 @@ import { CopyButton } from "./CopyButton";
 import { JournalExport } from "./JournalExport";
 import { PriceRail } from "./PriceRail";
 import { ResultRow } from "./ResultRow";
+import { TakeProfits } from "./TakeProfits";
 
 const usd = (value: number) => `${formatDe(value, 2)} USD`;
+const usdt = (value: number) => `${formatDe(value, 2)} USDT`;
 const btc = (value: number) => `${formatDe(value, 8)} BTC`;
 const pct = (value: number) => `${formatDe(value, 2)} %`;
 const price = (value: number) => (Number.isFinite(value) ? `${formatDe(value, 1)} USD` : "keine Liquidation");
@@ -56,7 +58,8 @@ function CopyColumn({ setting, label, exact, copyValue, recommended }: CopyColum
 }
 
 export function Results({ evaluation: e }: { evaluation: Evaluation }) {
-  const { direction, entry, stop, tp, leverage } = e.inputs;
+  const { account, direction, crvBasis, entry, stop, tp, leverage } = e.inputs;
+  const inAccountUnit = account === "btc" ? btc : usdt;
   return (
     <div className="results">
       <section className="card rail-card" aria-labelledby="rail-title">
@@ -101,7 +104,7 @@ export function Results({ evaluation: e }: { evaluation: Evaluation }) {
           <CopyColumn
             setting="By Cost – BTC"
             label={`Margin bei ${leverage}×`}
-            exact={btc(e.marginBtc)}
+            exact={account === "btc" ? btc(e.marginBtc) : `${btc(e.marginBtc)} ≈ ${usdt(e.marginUsdt)} zum Entry`}
             copyValue={toCopyValue(e.marginBtc, COPY_DECIMALS.marginBtc)}
           />
         </dl>
@@ -111,7 +114,7 @@ export function Results({ evaluation: e }: { evaluation: Evaluation }) {
         <div className="card kpi">
           <dt className="kpi__label">Risiko effektiv</dt>
           <dd className="kpi__value">{pct(e.riskPctEffective)}</dd>
-          <dd className="kpi__sub">Limit {btc(e.riskLimitBtc)}</dd>
+          <dd className="kpi__sub">Limit {inAccountUnit(e.riskLimit)}</dd>
         </div>
         <div className="card kpi">
           <dt className="kpi__label">Stop-Abstand</dt>
@@ -126,7 +129,7 @@ export function Results({ evaluation: e }: { evaluation: Evaluation }) {
           <dd className="kpi__sub">Liq-Abstand ÷ Stop-Abstand</dd>
         </div>
         <div className="card kpi">
-          <dt className="kpi__label">CRV</dt>
+          <dt className="kpi__label">CRV · Basis {crvBasis === "btc" ? "BTC" : "USD"}</dt>
           <dd className="kpi__value kpi__value--accent">{e.crv === null ? "–" : `${formatDe(e.crv, 2)} R`}</dd>
           <dd className="kpi__sub">{e.gainBtc === null ? "ohne TP" : `Gewinn ${btc(e.gainBtc)}`}</dd>
         </div>
@@ -138,10 +141,34 @@ export function Results({ evaluation: e }: { evaluation: Evaluation }) {
             Risiko
           </h2>
           <dl>
-            <ResultRow label="Risiko BTC netto" hint="Basis der Positionsgröße" value={btc(e.riskBtc)} />
-            <ResultRow label="Risiko BTC brutto" hint="inkl. Gebühren/Slippage" value={btc(e.grossRiskBtc)} />
+            {account === "btc" ? (
+              <>
+                <ResultRow label="Risiko BTC netto" hint="Basis der Positionsgröße" value={btc(e.riskBtc)} />
+                <ResultRow label="Risiko BTC brutto" hint="inkl. Gebühren/Slippage" value={btc(e.grossRiskBtc)} />
+                <ResultRow label="Verlust bei Stop" hint="netto, bewertet zum Stop-Kurs" value={usdt(e.lossAtStopUsdt)} />
+              </>
+            ) : (
+              <>
+                <ResultRow
+                  label="Risiko USDT netto"
+                  hint="Basis der Positionsgröße, Verlust bewertet zum Stop-Kurs"
+                  value={usdt(e.lossAtStopUsdt)}
+                />
+                <ResultRow label="Risiko USDT brutto" hint="inkl. Gebühren/Slippage" value={usdt(e.grossRisk)} />
+                <ResultRow label="Risiko BTC netto" hint="Risiko USDT ÷ Stop-Kurs" value={btc(e.riskBtc)} />
+              </>
+            )}
             <ResultRow label="Gewinn bei TP" value={e.gainBtc === null ? "–" : btc(e.gainBtc)} />
+            <ResultRow
+              label="Gewinn bei TP in USDT"
+              hint="bewertet zum TP-Kurs"
+              value={e.gainAtTpUsdt === null ? "–" : usdt(e.gainAtTpUsdt)}
+            />
           </dl>
+          <p className="details__note">
+            USDT-Werte: Gewinn/Verlust der Position, bewertet zum Stop- bzw. TP-Kurs. Die Kursänderung der
+            BTC-Sicherheit selbst ist nicht enthalten – das ist nicht die gesamte Kontoveränderung in USD.
+          </p>
         </section>
 
         <section className="card" aria-labelledby="liq-title">
@@ -159,7 +186,7 @@ export function Results({ evaluation: e }: { evaluation: Evaluation }) {
             )}
             <ResultRow
               label="Effektiver Hebel aufs Konto"
-              hint="Positionswert BTC ÷ Kontostand"
+              hint={account === "btc" ? "Positionswert BTC ÷ Kontostand" : "Positionswert USD ÷ Kontostand USDT"}
               value={`${formatDe(e.effectiveLeverage, 2)}×`}
             />
             <ResultRow
@@ -170,6 +197,8 @@ export function Results({ evaluation: e }: { evaluation: Evaluation }) {
           </dl>
         </section>
       </div>
+
+      <TakeProfits evaluation={e} />
 
       <JournalExport evaluation={e} />
     </div>
