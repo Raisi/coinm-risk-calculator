@@ -199,10 +199,10 @@ export function InputPanel({ inputs, targetCrv, errors, onChange, onCrvChange }:
         <GroupTitle number="04">Take-Profit-Plan</GroupTitle>
         <Segmented
           name="tpPlan"
-          legend="Plan"
+          legend="Anzeige"
           value={inputs.tpPlan}
           options={[
-            { value: "ladder", label: "Leiter" },
+            { value: "ladder", label: "CRV-Stufen" },
             { value: "partial", label: "Teil-TPs" },
           ]}
           onChange={(tpPlan) => onChange({ tpPlan })}
