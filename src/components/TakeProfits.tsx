@@ -120,7 +120,7 @@ export function TakeProfits({ evaluation: e }: { evaluation: Evaluation }) {
           Take-Profits
         </h2>
         <span className="card__meta">
-          {tps.plan === "ladder" ? "Leiter" : "Teil-TPs"} · CRV-Basis {basis}
+          {tps.plan === "ladder" ? "CRV-Stufen" : "Teil-TPs"} · CRV-Basis {basis}
         </span>
       </div>
       <p className="tps__note">
