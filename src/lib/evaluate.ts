@@ -65,7 +65,7 @@ export interface RawInputs {
 
 export const DEFAULT_INPUTS: RawInputs = {
   account: "btc",
-  balance: "0.00725346",
+  balance: "",
   balanceUsdt: "",
   riskMode: "pct",
   riskPct: "5",
