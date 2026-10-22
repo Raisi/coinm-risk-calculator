@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { BalanceField, BalanceRate } from "./balanceLink";
 import { crvFromPrices, type Direction } from "./calc";
 import { DEFAULT_INPUTS, type RawInputs } from "./evaluate";
 import {
@@ -35,7 +36,7 @@ function run(state: FormState, actions: FormAction[]): FormState {
 }
 
 /** One patch per prefix of `value`, i.e. typing it character by character. */
-function typed(field: "entry" | "stop" | "tp", value: string): FormAction[] {
+function typed(field: "entry" | "stop" | "tp" | BalanceField, value: string): FormAction[] {
   return Array.from({ length: value.length }, (_, i) => patch({ [field]: value.slice(0, i + 1) }));
 }
 
@@ -66,6 +67,16 @@ function deepFreeze<T>(value: T): T {
     Object.freeze(value);
   }
   return value;
+}
+
+/** Balance link of a state where no balance was typed and no live price fetched. */
+const UNLINKED = { balanceSource: null, balanceRate: null } as const;
+
+/** Balance source after a patch carrying exactly one balance field from a state without one. */
+function balanceSourceAfter(fields: Partial<RawInputs>): BalanceField | null {
+  if (fields.balance !== undefined && fields.balanceUsdt === undefined) return "balance";
+  if (fields.balanceUsdt !== undefined && fields.balance === undefined) return "balanceUsdt";
+  return null;
 }
 
 /**
@@ -125,7 +136,7 @@ const NON_TRADE_PATCHES: Partial<RawInputs>[] = [
 describe("INITIAL_FORM_STATE", () => {
   it("starts with the default inputs, an empty TP and a CRV-2 target", () => {
     expect(DEFAULT_CRV).toBe(2);
-    expect(INITIAL_FORM_STATE).toEqual({ inputs: DEFAULT_INPUTS, target: { kind: "crv", crv: 2 } });
+    expect(INITIAL_FORM_STATE).toEqual({ inputs: DEFAULT_INPUTS, target: { kind: "crv", crv: 2 }, ...UNLINKED });
     expect(INITIAL_FORM_STATE.inputs.tp).toBe("");
   });
 });
@@ -144,6 +155,7 @@ describe("formReducer – CRV target follows entry/stop", () => {
     expect(stop.final).toEqual({
       inputs: { ...DEFAULT_INPUTS, entry: "108000", stop: "105500", tp: "113373.1" },
       target: { kind: "crv", crv: 2 },
+      ...UNLINKED,
     });
   });
 
@@ -189,13 +201,14 @@ describe("formReducer – CRV target follows entry/stop", () => {
 
     // Exact 116265.306…
     const crv3 = formReducer(base, setCrv(3));
-    expect(crv3).toEqual({ inputs: { ...base.inputs, tp: "116265.3" }, target: { kind: "crv", crv: 3 } });
+    expect(crv3).toEqual({ inputs: { ...base.inputs, tp: "116265.3" }, target: { kind: "crv", crv: 3 }, ...UNLINKED });
 
     // 1 / (4/108000 − 3/106000) = 114480 exactly: no trailing ".0".
     const moved = formReducer(crv3, patch({ stop: "106000" }));
     expect(moved).toEqual({
       inputs: { ...base.inputs, stop: "106000", tp: "114480" },
       target: { kind: "crv", crv: 3 },
+      ...UNLINKED,
     });
   });
 
@@ -224,6 +237,7 @@ describe("formReducer – CRV target follows entry/stop", () => {
     const stale: FormState = {
       inputs: { ...DEFAULT_INPUTS, entry: "108000", stop: "105500", tp: "999" },
       target: { kind: "crv", crv: 2 },
+      ...UNLINKED,
     };
     expect(formReducer(stale, setCrv(2)).inputs.tp).toBe("113373.1");
     // Re-sending the current direction is an entry/stop/direction change: recomputes too.
@@ -329,7 +343,7 @@ describe("formReducer – TP typed by the user", () => {
     expect(stop105.inputs.tp).toBe("121935.5");
 
     const user = formReducer(stop105, patch({ tp: "115000" }));
-    expect(user).toEqual({ inputs: { ...stop105.inputs, tp: "115000" }, target: { kind: "tp" } });
+    expect(user).toEqual({ inputs: { ...stop105.inputs, tp: "115000" }, target: { kind: "tp" }, ...UNLINKED });
 
     const kept = tpTrace(user, [patch({ stop: "106000" }), patch({ entry: "109000" }), patch({ entry: "108000" }), patch({ stop: "105000" })]);
     expect(kept.tps).toEqual(["115000", "115000", "115000", "115000"]);
@@ -340,6 +354,7 @@ describe("formReducer – TP typed by the user", () => {
     expect(crv25).toEqual({
       inputs: { ...kept.final.inputs, tp: "116307.7" },
       target: { kind: "crv", crv: 2.5 },
+      ...UNLINKED,
     });
     // Exact 113346.534…
     const recomputed = formReducer(crv25, patch({ stop: "106000" }));
@@ -398,6 +413,7 @@ describe("formReducer – TP typed by the user", () => {
     expect(user).toEqual({
       inputs: { ...DEFAULT_INPUTS, entry: "108000", stop: "105500", tp: "115000" },
       target: { kind: "tp" },
+      ...UNLINKED,
     });
   });
 
@@ -407,13 +423,14 @@ describe("formReducer – TP typed by the user", () => {
     expect(user).toEqual({
       inputs: { ...crv.inputs, direction: "short", entry: "109000", stop: "106000", tp: "120000" },
       target: { kind: "tp" },
+      ...UNLINKED,
     });
   });
 
   it("CRV action works from the TP target and makes the CRV the target again", () => {
     const user = tpModeTrade("long", "108000", "105500", "115000");
     const crv3 = formReducer(user, setCrv(3));
-    expect(crv3).toEqual({ inputs: { ...user.inputs, tp: "116265.3" }, target: { kind: "crv", crv: 3 } });
+    expect(crv3).toEqual({ inputs: { ...user.inputs, tp: "116265.3" }, target: { kind: "crv", crv: 3 }, ...UNLINKED });
     expect(formReducer(crv3, patch({ stop: "106000" })).inputs.tp).toBe("114480");
   });
 });
@@ -465,12 +482,15 @@ describe("formReducer – non-trade fields", () => {
       expect(formReducer(crv3, patch(fields))).toEqual({
         inputs: { ...crv3.inputs, ...fields },
         target: { kind: "crv", crv: 3 },
+        balanceSource: balanceSourceAfter(fields),
+        balanceRate: null,
       });
 
       // A stale or empty TP is neither recomputed nor filled.
       const stale: FormState = {
         inputs: { ...DEFAULT_INPUTS, entry: "108000", stop: "105500", tp: "999" },
         target: { kind: "crv", crv: 2 },
+        ...UNLINKED,
       };
       expect(formReducer(stale, patch(fields)).inputs.tp).toBe("999");
       const empty: FormState = { ...stale, inputs: { ...stale.inputs, tp: "" } };
@@ -482,6 +502,8 @@ describe("formReducer – non-trade fields", () => {
       expect(formReducer(user, patch(fields))).toEqual({
         inputs: { ...user.inputs, ...fields },
         target: { kind: "tp" },
+        balanceSource: balanceSourceAfter(fields),
+        balanceRate: null,
       });
     });
   }
@@ -511,6 +533,7 @@ describe("formReducer – merging and immutability", () => {
         stop: "105500",
       },
       target: { kind: "crv", crv: 2 },
+      ...UNLINKED,
     };
     const next = formReducer(base, patch({ stop: "106000" }));
     expect(next.inputs).toEqual({ ...base.inputs, stop: "106000", tp: "112235.3" });
@@ -523,6 +546,7 @@ describe("formReducer – merging and immutability", () => {
     const stale: FormState = {
       inputs: { ...DEFAULT_INPUTS, entry: "108000", stop: "105500", tp: "999" },
       target: { kind: "crv", crv: 2 },
+      ...UNLINKED,
     };
     expect(formReducer(stale, patch({}))).toEqual(stale);
     const user = tpModeTrade("long", "108000", "105500", "115000");
@@ -549,7 +573,7 @@ describe("formReducer – merging and immutability", () => {
     expect(fromInitial).not.toBe(INITIAL_FORM_STATE);
     expect(INITIAL_FORM_STATE).toEqual(initialSnapshot);
     expect(DEFAULT_INPUTS).toEqual(defaultsSnapshot);
-    expect(INITIAL_FORM_STATE).toEqual({ inputs: DEFAULT_INPUTS, target: { kind: "crv", crv: 2 } });
+    expect(INITIAL_FORM_STATE).toEqual({ inputs: DEFAULT_INPUTS, target: { kind: "crv", crv: 2 }, ...UNLINKED });
 
     // Every intermediate state is frozen before the next action: any in-place write throws.
     let state = deepFreeze(structuredClone(INITIAL_FORM_STATE));
@@ -563,6 +587,9 @@ describe("formReducer – merging and immutability", () => {
     expect(state).toEqual({
       inputs: { ...DEFAULT_INPUTS, entry: "108000", stop: "106000", tp: "113346.5", balance: "9" },
       target: { kind: "crv", crv: 2.5 },
+      // The typed balance became the balance source; without a live price nothing was linked.
+      balanceSource: "balance",
+      balanceRate: null,
     });
   });
 });
@@ -784,6 +811,7 @@ describe("CRV basis usd", () => {
     expect(usd).toEqual({
       inputs: { ...btc.inputs, crvBasis: "usd", tp: "113000" },
       target: { kind: "crv", crv: 2 },
+      ...UNLINKED,
     });
     expect(formReducer(usd, patch({ crvBasis: "btc" }))).toEqual(btc);
   });
@@ -803,7 +831,11 @@ describe("CRV basis usd", () => {
 
   it("switching the basis before entry/stop are set leaves TP empty and keeps the target", () => {
     const state = formReducer(INITIAL_FORM_STATE, patch({ crvBasis: "usd" }));
-    expect(state).toEqual({ inputs: { ...DEFAULT_INPUTS, crvBasis: "usd" }, target: { kind: "crv", crv: 2 } });
+    expect(state).toEqual({
+      inputs: { ...DEFAULT_INPUTS, crvBasis: "usd" },
+      target: { kind: "crv", crv: 2 },
+      ...UNLINKED,
+    });
   });
 
   it("spreadsheet examples: long 90000/80000 2 R -> 110000, 2,5 R -> 115000; short 108000/110500 2 R -> 103000", () => {
@@ -863,5 +895,294 @@ describe("CRV basis usd", () => {
     const inputs = { crvBasis: "usd" as const, direction: "short" as const, entry: "0.3", stop: "0.31" };
     expect(tpInputForCrvText(inputs, "1")).toEqual({ error: TEXT_CRV_OFF_TICK });
     expect(tpInputForCrvText(inputs, "10")).toEqual({ tp: "0.2" });
+  });
+});
+
+describe("formReducer – Kontostand BTC ↔ USDT link", () => {
+  // Expected conversions at 81774.3 USDT per BTC, always rounded DOWN (truncated):
+  //   BTC → USDT, 2 decimals: 0.5 → 40887.15; 0.12 → 9812.916 → 9812.91; 0.123456 → 10095.5279808 → 10095.52
+  //   USDT → BTC, 8 decimals: 1000 → 0.0122287809… → 0.01222878; 50000 → 0.6114390462… → 0.61143904
+  // Converting a derived value back is lossy: 0.01222878 BTC → 999.99 USDT, 10095.52 USDT → 0.1234559 BTC.
+  const PRICE = 81774.3;
+  const RATE_TIME = new Date(2026, 9, 22, 11, 55, 8).getTime();
+
+  function rate(price: number): BalanceRate {
+    return { price, time: RATE_TIME };
+  }
+
+  function setRate(price: number): FormAction {
+    return { type: "balanceRate", rate: rate(price) };
+  }
+
+  /** Initial state after a fetched live price of 81774.3. */
+  function priced(): FormState {
+    return formReducer(INITIAL_FORM_STATE, setRate(PRICE));
+  }
+
+  /** Like `run`, but records [BTC, USDT] after every action. */
+  function balanceTrace(state: FormState, actions: FormAction[]): { final: FormState; pairs: [string, string][] } {
+    const pairs: [string, string][] = [];
+    let current = state;
+    for (const action of actions) {
+      current = formReducer(current, action);
+      pairs.push([current.inputs.balance, current.inputs.balanceUsdt]);
+    }
+    return { final: current, pairs };
+  }
+
+  function balances(state: FormState): Pick<FormState, "balanceSource" | "balanceRate"> & Pick<RawInputs, BalanceField> {
+    return {
+      balance: state.inputs.balance,
+      balanceUsdt: state.inputs.balanceUsdt,
+      balanceSource: state.balanceSource,
+      balanceRate: state.balanceRate,
+    };
+  }
+
+  it("typing BTC with a rate derives USDT on every keystroke and keeps the typed BTC text", () => {
+    const { final, pairs } = balanceTrace(priced(), typed("balance", "0.123456"));
+    expect(pairs).toEqual([
+      ["0", ""],
+      ["0.", ""],
+      ["0.1", "8177.43"],
+      ["0.12", "9812.91"],
+      ["0.123", "10058.23"],
+      ["0.1234", "10090.94"],
+      ["0.12345", "10095.03"],
+      ["0.123456", "10095.52"],
+    ]);
+    expect(final.balanceSource).toBe("balance");
+    expect(final.balanceRate).toEqual(rate(PRICE));
+  });
+
+  it("typing USDT with a rate derives BTC on every keystroke and keeps the typed USDT text", () => {
+    const { final, pairs } = balanceTrace(priced(), typed("balanceUsdt", "50000"));
+    expect(pairs).toEqual([
+      ["0.00006114", "5"],
+      ["0.00061143", "50"],
+      ["0.00611439", "500"],
+      ["0.0611439", "5000"],
+      ["0.61143904", "50000"],
+    ]);
+    expect(final.balanceSource).toBe("balanceUsdt");
+  });
+
+  it("German input is linked and kept verbatim", () => {
+    const { final, pairs } = balanceTrace(priced(), typed("balance", "0,5"));
+    expect(pairs).toEqual([
+      ["0", ""],
+      ["0,", ""],
+      ["0,5", "40887.15"],
+    ]);
+    const usdt = run(final, typed("balanceUsdt", "1.000,00"));
+    expect(usdt.inputs.balanceUsdt).toBe("1.000,00");
+    expect(usdt.inputs.balance).toBe("0.01222878");
+  });
+
+  it("the typed field is never rewritten from the derived one (no ping-pong, no drift)", () => {
+    const usdt = run(priced(), typed("balanceUsdt", "1000"));
+    expect(usdt.inputs).toMatchObject({ balance: "0.01222878", balanceUsdt: "1000" });
+    const btc = run(priced(), typed("balance", "0.123456"));
+    expect(btc.inputs).toMatchObject({ balance: "0.123456", balanceUsdt: "10095.52" });
+
+    // Repeated quotes and unrelated edits leave the pair exactly as it was: nothing converts back.
+    const later: FormAction[] = [
+      setRate(PRICE),
+      patch({ account: "usdt" }),
+      setRate(PRICE),
+      patch({ entry: "108000" }),
+      patch({ stop: "105500" }),
+      setCrv(3),
+      patch({ tp: "115000" }),
+      patch({ account: "btc" }),
+      setRate(PRICE),
+    ];
+    expect(balanceTrace(usdt, later).pairs.every(([b, u]) => b === "0.01222878" && u === "1000")).toBe(true);
+    expect(balanceTrace(btc, later).pairs.every(([b, u]) => b === "0.123456" && u === "10095.52")).toBe(true);
+  });
+
+  it("without a rate both fields are independent, but the source is still tracked", () => {
+    const btc = run(INITIAL_FORM_STATE, typed("balance", "0.5"));
+    expect(balances(btc)).toEqual({ balance: "0.5", balanceUsdt: "", balanceSource: "balance", balanceRate: null });
+
+    const both = run(btc, typed("balanceUsdt", "1000"));
+    expect(balances(both)).toEqual({ balance: "0.5", balanceUsdt: "1000", balanceSource: "balanceUsdt", balanceRate: null });
+
+    const cleared = formReducer(both, patch({ balance: "" }));
+    expect(balances(cleared)).toEqual({ balance: "", balanceUsdt: "1000", balanceSource: "balance", balanceRate: null });
+  });
+
+  it("a new rate recomputes the field linked to the BTC source and keeps the BTC text exactly", () => {
+    // USDT typed first, then BTC: BTC is the source, USDT an unrelated leftover.
+    const typedPair = run(INITIAL_FORM_STATE, [...typed("balanceUsdt", "123"), ...typed("balance", "0,5")]);
+    expect(balances(typedPair)).toEqual({ balance: "0,5", balanceUsdt: "123", balanceSource: "balance", balanceRate: null });
+
+    const { final, pairs } = balanceTrace(typedPair, [setRate(PRICE), setRate(90000), setRate(PRICE)]);
+    expect(pairs).toEqual([
+      ["0,5", "40887.15"],
+      ["0,5", "45000"],
+      ["0,5", "40887.15"],
+    ]);
+    expect(final.balanceSource).toBe("balance");
+    expect(final.balanceRate).toEqual(rate(PRICE));
+  });
+
+  it("a new rate recomputes the field linked to the USDT source and keeps the USDT text exactly", () => {
+    // BTC typed first, then USDT: USDT is the source; converting BTC "2" instead would give 163548.6 USDT.
+    const typedPair = run(INITIAL_FORM_STATE, [...typed("balance", "2"), ...typed("balanceUsdt", "50000")]);
+    const { final, pairs } = balanceTrace(typedPair, [setRate(PRICE), setRate(100000)]);
+    expect(pairs).toEqual([
+      ["0.61143904", "50000"],
+      ["0.5", "50000"],
+    ]);
+    expect(final.balanceSource).toBe("balanceUsdt");
+    expect(final.balanceRate).toEqual(rate(100000));
+  });
+
+  it("a rate before any balance was typed only stores the rate", () => {
+    const state = priced();
+    expect(state).toEqual({ ...INITIAL_FORM_STATE, balanceRate: rate(PRICE) });
+
+    // Values present without a source (e.g. restored) are not converted either.
+    const unsourced: FormState = {
+      inputs: { ...DEFAULT_INPUTS, balance: "0.5", balanceUsdt: "999" },
+      target: { kind: "crv", crv: 2 },
+      ...UNLINKED,
+    };
+    expect(formReducer(unsourced, setRate(PRICE))).toEqual({ ...unsourced, balanceRate: rate(PRICE) });
+
+    // The next keystroke links.
+    expect(formReducer(state, patch({ balance: "1" })).inputs.balanceUsdt).toBe("81774.3");
+  });
+
+  it("an empty, unparseable or non-positive source empties the derived field", () => {
+    const linked = run(priced(), typed("balance", "0.5"));
+    expect(linked.inputs.balanceUsdt).toBe("40887.15");
+    for (const text of ["", "   ", "abc", "1e5", "0", "0,00", "-1", "-0.5"]) {
+      const btc = formReducer(linked, patch({ balance: text }));
+      expect(btc.inputs).toMatchObject({ balance: text, balanceUsdt: "" });
+      expect(btc.balanceSource).toBe("balance");
+      const usdt = formReducer(linked, patch({ balanceUsdt: text }));
+      expect(usdt.inputs).toMatchObject({ balance: "", balanceUsdt: text });
+      expect(usdt.balanceSource).toBe("balanceUsdt");
+    }
+
+    // A rate arriving for an empty source empties the leftover in the other field.
+    const emptySource = run(INITIAL_FORM_STATE, [...typed("balanceUsdt", "777"), patch({ balance: "" })]);
+    expect(emptySource.inputs.balanceUsdt).toBe("777");
+    expect(formReducer(emptySource, setRate(PRICE)).inputs).toMatchObject({ balance: "", balanceUsdt: "" });
+  });
+
+  it("switching the account changes neither balance, the source nor the rate", () => {
+    const linked = run(priced(), typed("balanceUsdt", "1000"));
+    const toggled = tpTrace(linked, [patch({ account: "usdt" }), patch({ account: "btc" }), patch({ account: "usdt" })]);
+    expect(balances(toggled.final)).toEqual(balances(linked));
+    expect(toggled.final.inputs.account).toBe("usdt");
+
+    // Even a pair that does not match the rate is left alone: only typing or a new rate links.
+    const mismatched: FormState = {
+      inputs: { ...DEFAULT_INPUTS, balance: "0.5", balanceUsdt: "1" },
+      target: { kind: "crv", crv: 2 },
+      balanceSource: "balance",
+      balanceRate: rate(PRICE),
+    };
+    for (const account of ["usdt", "btc"] as const) {
+      expect(formReducer(mismatched, patch({ account }))).toEqual({
+        ...mismatched,
+        inputs: { ...mismatched.inputs, account },
+      });
+    }
+  });
+
+  it("balance edits and rates leave TP and the CRV target untouched", () => {
+    const crv3 = run(trade("long", "108000", "105500"), [setCrv(3), setRate(PRICE)]);
+    expect(crv3.inputs.tp).toBe("116265.3");
+    const edited = run(crv3, [...typed("balance", "0.5"), ...typed("balanceUsdt", "1000"), setRate(90000)]);
+    expect(edited.inputs).toEqual({ ...crv3.inputs, balance: "0.01111111", balanceUsdt: "1000" });
+    expect(edited.target).toEqual({ kind: "crv", crv: 3 });
+    // The CRV target still follows the stop afterwards.
+    expect(formReducer(edited, patch({ stop: "106000" })).inputs.tp).toBe("114480");
+  });
+
+  it("balance edits and rates leave a typed TP and the TP target untouched", () => {
+    const user = formReducer(tpModeTrade("long", "108000", "105500", "115000"), setRate(PRICE));
+    const edited = run(user, [...typed("balanceUsdt", "1000"), setRate(90000), ...typed("balance", "2")]);
+    expect(edited.inputs).toEqual({ ...user.inputs, balance: "2", balanceUsdt: "180000" });
+    expect(edited.target).toEqual({ kind: "tp" });
+  });
+
+  it("TP, CRV and trade edits leave both balances, the source and the rate untouched", () => {
+    const linked = run(priced(), typed("balance", "0.5"));
+    const edits: FormAction[] = [
+      // Entry is not the conversion price: only the live price links the pair.
+      ...typed("entry", "90000"),
+      ...typed("stop", "85000"),
+      setCrv(3),
+      patch({ direction: "short" }),
+      patch({ crvBasis: "usd" }),
+      ...typed("tp", "80000"),
+      patch({ tp: "" }),
+      patch({ leverage: "25", riskPct: "1" }),
+    ];
+    const { final, pairs } = balanceTrace(linked, edits);
+    expect(pairs.every(([b, u]) => b === "0.5" && u === "40887.15")).toBe(true);
+    expect(final.balanceSource).toBe("balance");
+    expect(final.balanceRate).toEqual(rate(PRICE));
+  });
+
+  it("a patch carrying both balances keeps both as given and links nothing", () => {
+    const linked = run(priced(), typed("balance", "0.5"));
+    const both = formReducer(linked, patch({ balance: "2", balanceUsdt: "5" }));
+    expect(balances(both)).toEqual({ balance: "2", balanceUsdt: "5", balanceSource: "balance", balanceRate: rate(PRICE) });
+
+    const usdtSource = run(priced(), typed("balanceUsdt", "1000"));
+    const bothFromUsdt = formReducer(usdtSource, patch({ balance: "2", balanceUsdt: "5" }));
+    expect(balances(bothFromUsdt)).toMatchObject({ balance: "2", balanceUsdt: "5", balanceSource: "balanceUsdt" });
+
+    const fromInitial = formReducer(priced(), patch({ balance: "2", balanceUsdt: "5" }));
+    expect(balances(fromInitial)).toMatchObject({ balance: "2", balanceUsdt: "5", balanceSource: null });
+  });
+
+  it("the source switches to the field the user types in", () => {
+    const btc = run(priced(), typed("balance", "0.5"));
+    expect(btc.balanceSource).toBe("balance");
+
+    const { final: usdt, pairs } = balanceTrace(btc, typed("balanceUsdt", "50000"));
+    expect(pairs.map(([, u]) => u)).toEqual(["5", "50", "500", "5000", "50000"]);
+    expect(usdt.inputs.balance).toBe("0.61143904");
+    expect(usdt.balanceSource).toBe("balanceUsdt");
+    // A new rate now converts from USDT.
+    expect(formReducer(usdt, setRate(100000)).inputs).toMatchObject({ balance: "0.5", balanceUsdt: "50000" });
+
+    const back = run(usdt, typed("balance", "1"));
+    expect(balances(back)).toEqual({ balance: "1", balanceUsdt: "81774.3", balanceSource: "balance", balanceRate: rate(PRICE) });
+  });
+
+  it("does not mutate states across rate and balance actions", () => {
+    const actions: FormAction[] = [
+      setRate(PRICE),
+      ...typed("balance", "0.5"),
+      setRate(90000),
+      ...typed("balanceUsdt", "1000"),
+      patch({ account: "usdt" }),
+      patch({ balance: "2", balanceUsdt: "5" }),
+      setRate(PRICE),
+    ];
+    const initialSnapshot = structuredClone(INITIAL_FORM_STATE);
+    let state = deepFreeze(structuredClone(INITIAL_FORM_STATE));
+    for (const action of actions) {
+      const snapshot = structuredClone(state);
+      const next = formReducer(state, action);
+      expect(state).toEqual(snapshot);
+      state = deepFreeze(next);
+    }
+    expect(INITIAL_FORM_STATE).toEqual(initialSnapshot);
+    // The two-field patch kept USDT as the source, so the last rate converts USDT "5" (5 / 81774.3 = 0.0000611…).
+    expect(balances(state)).toEqual({
+      balance: "0.00006114",
+      balanceUsdt: "5",
+      balanceSource: "balanceUsdt",
+      balanceRate: rate(PRICE),
+    });
   });
 });

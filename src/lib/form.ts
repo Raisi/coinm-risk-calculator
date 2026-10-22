@@ -1,8 +1,10 @@
 /**
- * Form state transitions: raw inputs plus what the take-profit is derived from (a CRV or the typed TP).
+ * Form state transitions: raw inputs, what the take-profit is derived from (a CRV or the typed TP) and the
+ * Kontostand BTC ↔ USDT link (see `balanceLink.ts`).
  * Pure, no React.
  */
 
+import { linkBalance, typedBalanceField, type BalanceField, type BalanceRate } from "./balanceLink";
 import { maxReachableCrv, TP_DECIMALS, tpOnTickForCrv, validLossPerUsd } from "./calc";
 import { DEFAULT_INPUTS, type RawInputs } from "./evaluate";
 import { formatDe, parseNumber, toPlainDecimal } from "./format";
@@ -69,35 +71,63 @@ export type TpTarget = { kind: "crv"; crv: number } | { kind: "tp" };
 export interface FormState {
   inputs: RawInputs;
   target: TpTarget;
+  /** Balance field the user typed in last; the other one is derived from it. `null` until one is typed. */
+  balanceSource: BalanceField | null;
+  /** Last fetched live price, the BTC ↔ USDT rate of the balance pair; `null` until one is fetched. */
+  balanceRate: BalanceRate | null;
 }
 
 export const INITIAL_FORM_STATE: FormState = {
   inputs: DEFAULT_INPUTS,
   target: { kind: "crv", crv: DEFAULT_CRV },
+  balanceSource: null,
+  balanceRate: null,
 };
 
-/** `patch`: form field edits; `crv`: a CRV set by the slider or the CRV field. */
-export type FormAction = { type: "patch"; patch: Partial<RawInputs> } | { type: "crv"; crv: number };
+/**
+ * `patch`: form field edits; `crv`: a CRV set by the slider or the CRV field; `balanceRate`: a fetched live
+ * price for the balance pair.
+ */
+export type FormAction =
+  | { type: "patch"; patch: Partial<RawInputs> }
+  | { type: "crv"; crv: number }
+  | { type: "balanceRate"; rate: BalanceRate };
 
 /**
  * - `patch` carrying `tp`: TP target, TP kept as given.
  * - other `patch`: merged; with a CRV target, a change to entry, stop, direction or CRV basis recomputes
  *   TP for it, or "" when it is not reachable. All other fields leave TP alone.
+ * - `patch` carrying exactly one of `balance` / `balanceUsdt`: that field becomes the balance source, kept
+ *   as given; with a rate, the other one is converted from it (see `convertBalance`). Without a rate both
+ *   are independent. Other patches (e.g. `account`) leave both balances alone.
  * - `crv`: when reachable (see `tpInputForCrv`) it becomes the target and TP is set for it; otherwise
  *   the state is returned unchanged.
+ * - `balanceRate`: becomes the rate; the field linked to the balance source is recomputed from it.
  */
 export function formReducer(state: FormState, action: FormAction): FormState {
   if (action.type === "crv") {
     const tp = tpInputForCrv(state.inputs, action.crv);
     if (tp === null) return state;
-    return { inputs: { ...state.inputs, tp }, target: { kind: "crv", crv: action.crv } };
+    return { ...state, inputs: { ...state.inputs, tp }, target: { kind: "crv", crv: action.crv } };
+  }
+  if (action.type === "balanceRate") {
+    const { balanceSource } = state;
+    const inputs =
+      balanceSource === null ? state.inputs : linkBalance(state.inputs, balanceSource, action.rate.price);
+    return { ...state, inputs, balanceRate: action.rate };
   }
   const { patch } = action;
-  const inputs = { ...state.inputs, ...patch };
-  if (patch.tp !== undefined) return { inputs, target: { kind: "tp" } };
+  const typedBalance = typedBalanceField(patch);
+  const merged = { ...state.inputs, ...patch };
+  const inputs =
+    typedBalance !== null && state.balanceRate !== null
+      ? linkBalance(merged, typedBalance, state.balanceRate.price)
+      : merged;
+  const balanceSource = typedBalance ?? state.balanceSource;
+  if (patch.tp !== undefined) return { ...state, inputs, target: { kind: "tp" }, balanceSource };
   const { target } = state;
   if (target.kind === "crv" && TP_SOURCE_FIELDS.some((field) => patch[field] !== undefined)) {
     inputs.tp = tpInputForCrv(inputs, target.crv) ?? "";
   }
-  return { inputs, target };
+  return { ...state, inputs, target, balanceSource };
 }

@@ -613,6 +613,40 @@ textarea {
   }
 }
 
+/* Kontostand BTC + USDT with the rate row that links them, kept closer together than the card's fields. */
+.balance-pair {
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+}
+
+/* The balance sizing does not read: a derived conversion, so its frame is dashed. */
+.field--linked .field__control {
+  border-style: dashed;
+}
+
+/* "Kurs laden" beside the rate and its status; the status wraps below the button in a narrow column. */
+.balance-rate {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.375rem 0.75rem;
+}
+
+.balance-rate .live-price {
+  flex: none;
+  width: auto;
+  padding-inline: 0.75rem;
+}
+
+.balance-rate__status {
+  display: flex;
+  flex: 1 1 12rem;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
 .slider-field {
   display: flex;
   align-items: center;

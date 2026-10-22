@@ -2,12 +2,14 @@ import { describe, expect, it } from "vitest";
 import {
   buildJournalTsv,
   COPY_DECIMALS,
+  exactDecimal,
   formatDe,
   formatDeCompact,
   formatLocalDateTime,
   parseNumber,
   toCopyValue,
   toPlainDecimal,
+  unitsToPlainDecimal,
   type JournalRow,
 } from "./format";
 
@@ -225,6 +227,74 @@ describe("toPlainDecimal", () => {
     expect(parsed).not.toBeNull();
     expect(parsed!).toBeLessThanOrEqual(value);
     expect(value - parsed!).toBeLessThan(10 ** -decimals * Math.max(1, value * 1e-15));
+  });
+});
+
+describe("exactDecimal", () => {
+  it.each<[number, bigint, number]>([
+    // The shortest round-trip form, not the binary value: 0.3 is 3/10, not 0.299999999999999988897….
+    [0.3, BigInt(3), 1],
+    [65432.1, BigInt(654321), 1],
+    [2453.229, BigInt(2453229), 3],
+    [1292, BigInt(1292), 0],
+    [0, BigInt(0), 0],
+    // 0.1 + 0.2 is 0.30000000000000004 as displayed, and stays that.
+    [0.1 + 0.2, BigInt("30000000000000004"), 17],
+  ])("%s -> %s / 10^%i", (value, units, scale) => {
+    expect(exactDecimal(value)).toEqual({ units, scale });
+  });
+
+  it.each<[number, string, bigint, number]>([
+    [5e-7, "5e-7", BigInt(5), 7],
+    [1.5e-7, "1.5e-7", BigInt(15), 8],
+    [5e-324, "5e-324", BigInt(5), 324],
+    [1e21, "1e+21", BigInt(10) ** BigInt(21), 0],
+    [1.2345e21, "1.2345e+21", BigInt(12345) * BigInt(10) ** BigInt(17), 0],
+    [Number.MAX_VALUE, "1.7976931348623157e+308", BigInt("17976931348623157") * BigInt(10) ** BigInt(292), 0],
+  ])("parses the exponent form of %s (%s)", (value, text, units, scale) => {
+    expect(String(value)).toBe(text);
+    expect(exactDecimal(value)).toEqual({ units, scale });
+  });
+
+  it.each([Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY])("%s throws a RangeError", (value) => {
+    expect(() => exactDecimal(value)).toThrow(RangeError);
+  });
+});
+
+describe("unitsToPlainDecimal", () => {
+  it.each<[bigint, number, string]>([
+    [BigInt(1962963), 2, "19629.63"],
+    [BigInt(3000000), 8, "0.03"],
+    // Trailing zeros are dropped, with the point when nothing is left after it.
+    [BigInt(1962960), 2, "19629.6"],
+    [BigInt(1962900), 2, "19629"],
+    [BigInt(10000), 2, "100"],
+    [BigInt(30000000), 8, "0.3"],
+    [BigInt(0), 8, "0"],
+    // Zeros before the point and with 0 decimals are kept.
+    [BigInt(100), 0, "100"],
+    [BigInt(10500), 2, "105"],
+    // Leading zeros are padded in below 1.
+    [BigInt(1), 8, "0.00000001"],
+    [BigInt(12), 8, "0.00000012"],
+    [BigInt(5), 2, "0.05"],
+  ])("%s at %i decimals -> %s", (units, decimals, expected) => {
+    expect(unitsToPlainDecimal(units, decimals)).toBe(expected);
+  });
+
+  it("writes huge values as plain digits, never in exponent form", () => {
+    expect(unitsToPlainDecimal(BigInt(10) ** BigInt(311), 8)).toBe(`1${"0".repeat(303)}`);
+    expect(unitsToPlainDecimal(BigInt(10) ** BigInt(23) + BigInt(1), 2)).toBe("1000000000000000000000.01");
+  });
+
+  it("matches toPlainDecimal for the same value, so derived balances look like copy values", () => {
+    for (const decimals of [0, 2, 8]) {
+      for (const units of [0, 1, 5, 12, 100, 1050, 1962963, 3000000, 81774300, 123456789012]) {
+        expect(unitsToPlainDecimal(BigInt(units), decimals), `${units} at ${decimals}`).toBe(
+          toPlainDecimal(units / 10 ** decimals, decimals),
+        );
+      }
+    }
   });
 });
 

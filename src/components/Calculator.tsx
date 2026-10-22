@@ -8,7 +8,7 @@ import { Results } from "./Results";
 import { Warnings } from "./Warnings";
 
 export function Calculator() {
-  const [{ inputs, target }, dispatch] = useReducer(formReducer, INITIAL_FORM_STATE);
+  const [{ inputs, target, balanceRate }, dispatch] = useReducer(formReducer, INITIAL_FORM_STATE);
   const result = useMemo(() => evaluate(inputs), [inputs]);
 
   return (
@@ -17,8 +17,10 @@ export function Calculator() {
         inputs={inputs}
         errors={result.ok ? [] : result.errors}
         targetCrv={target.kind === "crv" ? target.crv : null}
+        balanceRate={balanceRate}
         onChange={(patch) => dispatch({ type: "patch", patch })}
         onCrvChange={(crv) => dispatch({ type: "crv", crv })}
+        onBalanceRate={(rate) => dispatch({ type: "balanceRate", rate })}
       />
       <div className="outputs">
         <Warnings result={result} />

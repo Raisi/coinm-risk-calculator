@@ -1,6 +1,13 @@
 "use client";
 
 import { useRef, useState, type ReactNode } from "react";
+import {
+  balanceRate,
+  balanceRateHint,
+  TEXT_BALANCE_RATE_FAILED,
+  TEXT_BALANCE_RATE_MISSING,
+  type BalanceRate,
+} from "@/lib/balanceLink";
 import { crvFromPrices, MAX_LEVERAGE, MIN_LEVERAGE, validLossPerUsd } from "@/lib/calc";
 import {
   FIELD_LABELS,
@@ -11,7 +18,7 @@ import {
 } from "@/lib/evaluate";
 import { formatDe, formatDeCompact, parseNumber } from "@/lib/format";
 import { DEFAULT_CRV, tpInputForCrvText } from "@/lib/form";
-import { TEXT_LIVE_PRICE_FAILED } from "@/lib/livePrice";
+import { livePriceEntry, TEXT_LIVE_PRICE_FAILED } from "@/lib/livePrice";
 import { Icon } from "./Icon";
 import { useLivePrice } from "./useLivePrice";
 
@@ -19,10 +26,14 @@ interface InputPanelProps {
   inputs: RawInputs;
   /** CRV TP is derived from; `null` while TP is typed. Shown while TP is empty. */
   targetCrv: number | null;
+  /** Last fetched live price linking Kontostand BTC and USDT; `null` until one is fetched. */
+  balanceRate: BalanceRate | null;
   errors: InputError[];
   onChange: (patch: Partial<RawInputs>) => void;
   /** A CRV from the slider or the CRV field; ignored when not reachable. */
   onCrvChange: (crv: number) => void;
+  /** A live price fetched by either button; it becomes the balance rate. */
+  onBalanceRate: (rate: BalanceRate) => void;
 }
 
 const ASSUMPTION_FIELDS: NumericField[] = ["bufferPct", "mmr", "safetyFactor", "nearFactor"];
@@ -36,18 +47,40 @@ const CRV_SLIDER = { min: 0.5, max: 10, step: 0.1, fallback: DEFAULT_CRV } as co
 /** Accessible name of the live price button; starts with its visible text. */
 const LIVE_PRICE_LABEL = "Aktueller Kurs von Binance als Entry übernehmen";
 
-export function InputPanel({ inputs, targetCrv, errors, onChange, onCrvChange }: InputPanelProps) {
+/** Accessible name of the balance rate button; starts with its visible text. */
+const BALANCE_RATE_LABEL = "Kurs laden: aktueller Binance-Kurs zum Umrechnen von BTC und USDT";
+
+/** The linked Kontostand pair, BTC first. */
+const BALANCE_FIELDS = [
+  { name: "balance", unit: "BTC" },
+  { name: "balanceUsdt", unit: "USDT" },
+] as const;
+
+export function InputPanel({
+  inputs,
+  targetCrv,
+  balanceRate: rate,
+  errors,
+  onChange,
+  onCrvChange,
+  onBalanceRate,
+}: InputPanelProps) {
   // Missing fields are listed in the status panel; inline messages are for wrong values only.
   const fieldError = (field: NumericField) =>
     errors.find((e) => e.field === field && e.kind !== "missing")?.message;
   const assumptionsInvalid = ASSUMPTION_FIELDS.some((f) => fieldError(f) !== undefined);
   const [assumptionsOpen, setAssumptionsOpen] = useState(false);
-  // A fetched price goes through the same patch as a typed Entry, so a CRV target recomputes TP.
-  const livePrice = useLivePrice((entry) => onChange({ entry }));
-  const livePriceLoading = livePrice.state.kind === "loading";
+  // One live price for both buttons. A fetched Entry goes through the same patch as a typed Entry, so a CRV
+  // target recomputes TP; every fetched quote also becomes the balance rate.
+  const livePrice = useLivePrice((quote, target, receivedAt) => {
+    if (target === "entry") onChange({ entry: livePriceEntry(quote.price) });
+    onBalanceRate(balanceRate(quote, receivedAt));
+  });
 
   const { account, direction, crvBasis } = inputs;
   const accountUnit = account === "btc" ? "BTC" : "USDT";
+  // The balance field sizing reads (see `evaluate`); the other one is only the linked conversion.
+  const balanceUsed = account === "btc" ? "balance" : "balanceUsdt";
   const entry = parseNumber(inputs.entry);
   const stop = parseNumber(inputs.stop);
   const tp = parseNumber(inputs.tp);
@@ -102,7 +135,43 @@ export function InputPanel({ inputs, targetCrv, errors, onChange, onCrvChange }:
           ]}
           onChange={(value) => onChange({ account: value })}
         />
-        {account === "btc" ? field("balance", { unit: "BTC" }) : field("balanceUsdt", { unit: "USDT" })}
+        <div className="balance-pair">
+          <div className="field-row">
+            {BALANCE_FIELDS.map(({ name, unit }) => (
+              <NumberField
+                key={name}
+                id={name}
+                label={`${FIELD_LABELS[name]} ${unit}`}
+                value={inputs[name]}
+                onChange={(value) => onChange({ [name]: value })}
+                unit={unit}
+                hint={name === balanceUsed ? "zählt für die Berechnung" : "nur Umrechnung"}
+                className={name === balanceUsed ? undefined : "field--linked"}
+                error={fieldError(name)}
+              />
+            ))}
+          </div>
+          <div className="balance-rate">
+            <button
+              type="button"
+              className="live-price"
+              onClick={() => livePrice.load("balance")}
+              disabled={livePrice.loading}
+              aria-busy={livePrice.state.balance.kind === "loading"}
+              aria-label={BALANCE_RATE_LABEL}
+              title={BALANCE_RATE_LABEL}
+            >
+              <Icon name="refresh" size={14} />
+              Kurs laden
+            </button>
+            <div className="balance-rate__status" aria-live="polite">
+              <p className="field__hint">{rate !== null ? balanceRateHint(rate) : TEXT_BALANCE_RATE_MISSING}</p>
+              {livePrice.state.balance.kind === "failed" && (
+                <p className="field__error">{TEXT_BALANCE_RATE_FAILED}</p>
+              )}
+            </div>
+          </div>
+        </div>
         <Segmented
           name="riskMode"
           legend="Risiko-Modus"
@@ -150,7 +219,7 @@ export function InputPanel({ inputs, targetCrv, errors, onChange, onCrvChange }:
             label={FIELD_LABELS.entry}
             value={inputs.entry}
             onChange={(entry) => {
-              livePrice.cancel();
+              livePrice.cancel("entry");
               onChange({ entry });
             }}
             unit="USD"
@@ -159,9 +228,9 @@ export function InputPanel({ inputs, targetCrv, errors, onChange, onCrvChange }:
               <button
                 type="button"
                 className="live-price"
-                onClick={livePrice.load}
-                disabled={livePriceLoading}
-                aria-busy={livePriceLoading}
+                onClick={() => livePrice.load("entry")}
+                disabled={livePrice.loading}
+                aria-busy={livePrice.state.entry.kind === "loading"}
                 aria-label={LIVE_PRICE_LABEL}
                 title={LIVE_PRICE_LABEL}
               >
@@ -170,9 +239,9 @@ export function InputPanel({ inputs, targetCrv, errors, onChange, onCrvChange }:
               </button>
             }
             actionStatus={
-              livePrice.state.kind === "done"
-                ? { text: livePrice.state.hint, error: false }
-                : livePrice.state.kind === "failed"
+              livePrice.state.entry.kind === "done"
+                ? { text: livePrice.state.entry.hint, error: false }
+                : livePrice.state.entry.kind === "failed"
                   ? { text: TEXT_LIVE_PRICE_FAILED, error: true }
                   : undefined
             }
@@ -308,6 +377,8 @@ interface NumberFieldProps {
   action?: ReactNode;
   /** Result of `action`, shown below it in a polite live region (rendered with `action`, so it is announced). */
   actionStatus?: { text: string; error: boolean };
+  /** Modifier class of the field wrapper, e.g. `field--linked`. */
+  className?: string;
 }
 
 function NumberField({
@@ -321,12 +392,13 @@ function NumberField({
   error,
   action,
   actionStatus,
+  className,
 }: NumberFieldProps) {
   const hintId = hint !== undefined ? `${id}-hint` : undefined;
   const errorId = error !== undefined ? `${id}-error` : undefined;
   const statusId = action !== undefined ? `${id}-status` : undefined;
   return (
-    <div className="field">
+    <div className={className === undefined ? "field" : `field ${className}`}>
       <label htmlFor={id} className="field__label">
         {label}
         {optional && <span className="field__optional"> · optional</span>}
