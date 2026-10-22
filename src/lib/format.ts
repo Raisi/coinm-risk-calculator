@@ -33,6 +33,35 @@ export function parseNumber(input: string): number | null {
 }
 
 /**
+ * A number as an exact decimal: `units / 10^scale`, with `scale` ≥ 0.
+ */
+export interface ExactDecimal {
+  units: bigint;
+  scale: number;
+}
+
+const TEN = BigInt(10);
+
+/** 10^`exponent` (`exponent` ≥ 0) as a BigInt. */
+export function pow10(exponent: number): bigint {
+  return TEN ** BigInt(exponent);
+}
+
+/**
+ * Exact decimal of the shortest round-trip form of a finite `value` (`String(value)`), so binary noise
+ * never enters decimal arithmetic on it: 0.3 -> 3 / 10, 5e-7 -> 5 / 10^7, 1e21 -> 10^21 / 1.
+ */
+export function exactDecimal(value: number): ExactDecimal {
+  if (!Number.isFinite(value)) throw new RangeError(`Exact decimal needs a finite value, got ${value}`);
+  // e.g. "1292.9", "5e-7", "1.5e-7", "1e+21"
+  const [mantissa, exponent = "0"] = String(value).split("e");
+  const [intPart, fracPart = ""] = mantissa.split(".");
+  const units = BigInt(intPart + fracPart);
+  const scale = fracPart.length - Number(exponent);
+  return scale < 0 ? { units: units * pow10(-scale), scale: 0 } : { units, scale };
+}
+
+/**
  * Exchange copy value: rounded DOWN to `decimals` places, dot decimal, no grouping.
  *
  * Truncates the shortest round-trip decimal form of `value` (`String(value)`) instead of doing
@@ -66,6 +95,16 @@ export function toCopyValue(value: number, decimals: number): string {
 export function toPlainDecimal(value: number, decimals: number): string {
   const copy = toCopyValue(value, decimals);
   return copy.includes(".") ? copy.replace(/0+$/, "").replace(/\.$/, "") : copy;
+}
+
+/**
+ * `units / 10^decimals` (`units` ≥ 0) in the `toPlainDecimal` format: dot decimal, no grouping, never
+ * exponential, trailing zeros dropped, e.g. 1962963 at 2 -> "19629.63", 3000000 at 8 -> "0.03".
+ */
+export function unitsToPlainDecimal(units: bigint, decimals: number): string {
+  const digits = units.toString().padStart(decimals + 1, "0");
+  if (decimals === 0) return digits;
+  return `${digits.slice(0, -decimals)}.${digits.slice(-decimals)}`.replace(/\.?0+$/, "");
 }
 
 /** Copy value for the journal: same truncation, decimal comma, trailing zeros dropped. */
