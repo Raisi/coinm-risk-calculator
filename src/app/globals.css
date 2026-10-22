@@ -620,9 +620,24 @@ textarea {
   gap: 0.625rem;
 }
 
-/* The balance sizing does not read: a derived conversion, so its frame is dashed. */
+/* The balance sizing does not read: a derived, read-only conversion, so its frame is dashed and static. */
 .field--linked .field__control {
   border-style: dashed;
+}
+
+.field--linked .field__control:hover {
+  border-color: var(--border-active);
+}
+
+/* Still focusable for screen readers and copying; a neutral ring instead of the "type here" glow. */
+.field--linked .field__control:focus-within {
+  border-color: var(--text-muted);
+  box-shadow: none;
+}
+
+.field--linked .field__control input {
+  color: var(--text-secondary);
+  cursor: default;
 }
 
 /* "Kurs laden" beside the rate and its status; the status wraps below the button in a narrow column. */
