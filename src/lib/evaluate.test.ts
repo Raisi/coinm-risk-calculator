@@ -550,7 +550,6 @@ describe("copy values end to end: never above the calculated sizing (QA copy rou
   it("QA reproduction C: tiny but finite stop distance never copies above the calculated position", () => {
     const e = ok(
       inputs({
-        balance: DEFAULT_INPUTS.balance,
         riskPct: DEFAULT_INPUTS.riskPct,
         entry: "100",
         stop: "99.99999999999999",
