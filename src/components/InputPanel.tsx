@@ -11,6 +11,9 @@ import {
 } from "@/lib/evaluate";
 import { formatDe, formatDeCompact, parseNumber } from "@/lib/format";
 import { DEFAULT_CRV, tpInputForCrvText } from "@/lib/form";
+import { TEXT_LIVE_PRICE_FAILED } from "@/lib/livePrice";
+import { Icon } from "./Icon";
+import { useLivePrice } from "./useLivePrice";
 
 interface InputPanelProps {
   inputs: RawInputs;
@@ -30,12 +33,18 @@ const RISK_SLIDER = { min: 0, max: 100, step: 1 } as const;
 /** CRV slider range in R; position while the CRV field holds no number. */
 const CRV_SLIDER = { min: 0.5, max: 10, step: 0.1, fallback: DEFAULT_CRV } as const;
 
+/** Accessible name of the live price button; starts with its visible text. */
+const LIVE_PRICE_LABEL = "Aktueller Kurs von Binance als Entry übernehmen";
+
 export function InputPanel({ inputs, targetCrv, errors, onChange, onCrvChange }: InputPanelProps) {
   // Missing fields are listed in the status panel; inline messages are for wrong values only.
   const fieldError = (field: NumericField) =>
     errors.find((e) => e.field === field && e.kind !== "missing")?.message;
   const assumptionsInvalid = ASSUMPTION_FIELDS.some((f) => fieldError(f) !== undefined);
   const [assumptionsOpen, setAssumptionsOpen] = useState(false);
+  // A fetched price goes through the same patch as a typed Entry, so a CRV target recomputes TP.
+  const livePrice = useLivePrice((entry) => onChange({ entry }));
+  const livePriceLoading = livePrice.state.kind === "loading";
 
   const { account, direction, crvBasis } = inputs;
   const accountUnit = account === "btc" ? "BTC" : "USDT";
@@ -136,7 +145,38 @@ export function InputPanel({ inputs, targetCrv, errors, onChange, onCrvChange }:
           onChange={(direction) => onChange({ direction })}
         />
         <div className="field-row">
-          {field("entry", { unit: "USD" })}
+          <NumberField
+            id="entry"
+            label={FIELD_LABELS.entry}
+            value={inputs.entry}
+            onChange={(entry) => {
+              livePrice.cancel();
+              onChange({ entry });
+            }}
+            unit="USD"
+            error={fieldError("entry")}
+            action={
+              <button
+                type="button"
+                className="live-price"
+                onClick={livePrice.load}
+                disabled={livePriceLoading}
+                aria-busy={livePriceLoading}
+                aria-label={LIVE_PRICE_LABEL}
+                title={LIVE_PRICE_LABEL}
+              >
+                <Icon name="refresh" size={14} />
+                Aktueller Kurs
+              </button>
+            }
+            actionStatus={
+              livePrice.state.kind === "done"
+                ? { text: livePrice.state.hint, error: false }
+                : livePrice.state.kind === "failed"
+                  ? { text: TEXT_LIVE_PRICE_FAILED, error: true }
+                  : undefined
+            }
+          />
           {field("stop", { unit: "USD" })}
         </div>
         {field("tp", { unit: "USD", optional: true })}
@@ -264,11 +304,27 @@ interface NumberFieldProps {
   /** Marks the label "· optional". */
   optional?: boolean;
   error?: string;
+  /** Control below the input, e.g. the "Aktueller Kurs" button. */
+  action?: ReactNode;
+  /** Result of `action`, shown below it in a polite live region (rendered with `action`, so it is announced). */
+  actionStatus?: { text: string; error: boolean };
 }
 
-function NumberField({ id, label, value, onChange, unit, hint, optional, error }: NumberFieldProps) {
+function NumberField({
+  id,
+  label,
+  value,
+  onChange,
+  unit,
+  hint,
+  optional,
+  error,
+  action,
+  actionStatus,
+}: NumberFieldProps) {
   const hintId = hint !== undefined ? `${id}-hint` : undefined;
   const errorId = error !== undefined ? `${id}-error` : undefined;
+  const statusId = action !== undefined ? `${id}-status` : undefined;
   return (
     <div className="field">
       <label htmlFor={id} className="field__label">
@@ -285,10 +341,21 @@ function NumberField({ id, label, value, onChange, unit, hint, optional, error }
           value={value}
           onChange={(e) => onChange(e.target.value)}
           aria-invalid={error !== undefined}
-          aria-describedby={[hintId, errorId].filter(Boolean).join(" ") || undefined}
+          aria-describedby={
+            [hintId, errorId, actionStatus !== undefined ? statusId : undefined].filter(Boolean).join(" ") ||
+            undefined
+          }
         />
         {unit !== undefined && <span className="field__unit">{unit}</span>}
       </span>
+      {action !== undefined && (
+        <div className="field__action">
+          {action}
+          <p id={statusId} className={actionStatus?.error ? "field__error" : "field__hint"} aria-live="polite">
+            {actionStatus?.text}
+          </p>
+        </div>
+      )}
       {hint !== undefined && (
         <p id={hintId} className="field__hint">
           {hint}
