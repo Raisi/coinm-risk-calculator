@@ -620,7 +620,10 @@ textarea {
   gap: 0.625rem;
 }
 
-/* The balance sizing does not read: a derived, read-only conversion, so its frame is dashed and static. */
+/*
+ * The balance sizing does not read: a derived conversion, disabled (not focusable or selectable), so its frame is
+ * dashed and static. Text colour and cursor come from the shared disabled-input style.
+ */
 .field--linked .field__control {
   border-style: dashed;
 }
@@ -629,15 +632,9 @@ textarea {
   border-color: var(--border-active);
 }
 
-/* Still focusable for screen readers and copying; a neutral ring instead of the "type here" glow. */
-.field--linked .field__control:focus-within {
-  border-color: var(--text-muted);
-  box-shadow: none;
-}
-
+/* Chrome still lets the mouse select a disabled input's text; the frame keeps the not-allowed cursor. */
 .field--linked .field__control input {
-  color: var(--text-secondary);
-  cursor: default;
+  pointer-events: none;
 }
 
 /* "Kurs laden" beside the rate and its status; the status wraps below the button in a narrow column. */

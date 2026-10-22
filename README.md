@@ -20,13 +20,13 @@ Live: <https://raisi.github.io/coinm-risk-calculator/> · Fehler und Wünsche bi
   In beiden Modi zeigt die Risiko-Karte Verlust bei Stop und Gewinn bei TP zusätzlich in USDT (bewertet zum
   Stop-/TP-Kurs, ohne die Kursänderung der BTC-Sicherheit selbst).
 - **Kontostand BTC und USDT.** Beide Felder stehen nebeneinander; eingeben lässt sich nur das Feld der gewählten
-  Kontowährung („zählt für die Berechnung“), das andere ist schreibgeschützt und zeigt die Umrechnung (gestrichelter
-  Rahmen). Umgerechnet wird zum zuletzt geladenen Binance-Kurs (siehe unten): BTC getippt → USDT = BTC × Kurs, auf 2
-  Nachkommastellen abgerundet; USDT getippt → BTC = USDT ÷ Kurs, auf 8 Nachkommastellen (1 Sat) abgerundet. Das
-  zuletzt getippte Feld bleibt immer wie eingegeben; ein neuer Kurs rechnet nur das andere Feld neu. Ist das getippte
-  Feld leer, ungültig oder ≤ 0 (oder rundet das Ergebnis auf 0 ab), wird das andere leer. Ohne geladenen Kurs bleibt
-  das schreibgeschützte Feld unverändert. Das Umschalten von „Konto in“ ändert keinen der beiden Werte, macht aber das
-  andere Feld eingebbar.
+  Kontowährung („zählt für die Berechnung“). Das andere ist gesperrt (nicht fokussier- oder markierbar) und zeigt die
+  Umrechnung (gestrichelter Rahmen). Umgerechnet wird zum zuletzt geladenen Binance-Kurs (siehe unten): BTC getippt →
+  USDT = BTC × Kurs, auf 2 Nachkommastellen abgerundet; USDT getippt → BTC = USDT ÷ Kurs, auf 8 Nachkommastellen
+  (1 Sat) abgerundet. Das zuletzt getippte Feld bleibt immer wie eingegeben; ein neuer Kurs rechnet nur das andere Feld
+  neu. Ist das getippte Feld leer, ungültig oder ≤ 0 (oder rundet das Ergebnis auf 0 ab), wird das andere leer. Ohne
+  geladenen Kurs bleibt das gesperrte Feld unverändert. Das Umschalten von „Konto in“ ändert keinen der beiden Werte,
+  macht aber das andere Feld eingebbar.
 - **CRV-Basis BTC | USD.** BTC: Gewinn in BTC ÷ Risiko in BTC (inverser Kontrakt, Long nach oben begrenzt).
   USD: linear `|TP − Entry| / |Entry − Stop|` wie im Chart, TP = Entry + R · (Entry − Stop); ein Short ist hier durch
   TP > 0 begrenzt. Gilt für CRV-Regler, TP, CRV-Kennzahl, Preisleiste, Journal und den TP-Plan.
