@@ -5,7 +5,8 @@ Kontrakt). Aus Kontostand, Risikobudget, Entry und Stop berechnet sie Positionsw
 Hebel und den geschätzten Liquidationspreis – und prüft per Ampel, ob die Liquidation sicher jenseits des Stops liegt.
 Dazu Kopierwerte für das Bitunix-Orderpanel, Preisleiste, Warnungen und Journal-Export (TSV).
 
-Alles läuft im Browser: kein Backend, keine Exchange-API, keine Schlüssel, keine Netzwerkaufrufe.
+Alles läuft im Browser: kein Backend, keine Schlüssel, keine Cookies. Einzige Netzwerkanfrage ist der Button
+**Aktueller Kurs** am Entry-Feld – nur beim Klick, ein GET an die öffentliche Binance-API (siehe unten).
 
 Live: <https://raisi.github.io/coinm-risk-calculator/> · Fehler und Wünsche bitte als
 [Issue](https://github.com/Raisi/coinm-risk-calculator/issues) melden.
@@ -23,6 +24,20 @@ Live: <https://raisi.github.io/coinm-risk-calculator/> · Fehler und Wünsche bi
 - **TP-Plan CRV-Stufen | Teil-TPs.** CRV-Stufen: TP-Preise (0,1-USD-Tick) für 1–10 R mit Abstand und Gewinn. Teil-TPs: drei
   TPs mit R und Anteil (Summe 100 %), je TP-Preis, abgerundete Kopiermenge in BTC (Rest auf dem letzten Teil),
   Gewinn sowie Gesamtgewinn und gewichteter CRV.
+
+## Aktueller Kurs
+
+Der Button **Aktueller Kurs** unter dem Entry-Feld setzt Entry auf den aktuellen Preis des Binance Coin-M Perpetuals
+`BTCUSD_PERP` (gleicher Kontrakttyp wie Bitunix BTC Coin-M; die Bitunix-API erlaubt keinen Abruf von einer
+statischen Seite), abgerundet auf den 0,1-USD-Tick. Der Wert wird wie ein getippter Entry übernommen; mit CRV-Ziel
+wird TP neu berechnet. Darunter stehen Quelle und Zeit des Kurses. Er kann leicht vom Bitunix-Kurs abweichen.
+
+- Je Klick genau eine Anfrage an `https://dapi.binance.com/dapi/v1/ticker/price?symbol=BTCUSD_PERP`, ohne Cookies
+  und ohne Cache. Kein Abruf beim Laden der Seite oder bei Eingaben, kein Polling.
+- Während des Abrufs ist der Button gesperrt. Nach 8 s, beim Tippen in Entry oder beim Verlassen der Seite wird
+  der Abruf abgebrochen; eine verspätete Antwort ändert Entry nicht mehr.
+- Ist Binance nicht erreichbar (z. B. regional gesperrt) oder die Antwort unplausibel, bleibt Entry unverändert
+  und am Feld erscheint „Kurs nicht abrufbar“.
 
 ## Entwicklung
 
@@ -45,7 +60,7 @@ PAGES_BASE_PATH=/coinm-risk-calculator npm run build
 
 Die Rechenlogik liegt rein und ohne React in `src/lib/` (`calc.ts` Formeln, `evaluate.ts` Validierung und Ampel,
 `format.ts` Zahlen-Parsing, de-DE-Anzeige, Kopierwerte, Journal-TSV, `form.ts` Formularzustand inkl. TP-Vorbelegung
-für CRV 2, `tpPlan.ts` CRV-Stufen und Teil-TPs).
+für CRV 2, `tpPlan.ts` CRV-Stufen und Teil-TPs, `livePrice.ts` Abruf und Prüfung des Binance-Kurses).
 
 ## Deployment auf GitHub Pages
 
