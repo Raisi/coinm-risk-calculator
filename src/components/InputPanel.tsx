@@ -147,7 +147,7 @@ export function InputPanel({
                 unit={unit}
                 hint={name === balanceUsed ? "zählt für die Berechnung" : "nur Umrechnung"}
                 className={name === balanceUsed ? undefined : "field--linked"}
-                readOnly={name !== balanceUsed}
+                disabled={name !== balanceUsed}
                 error={fieldError(name)}
               />
             ))}
@@ -380,8 +380,8 @@ interface NumberFieldProps {
   actionStatus?: { text: string; error: boolean };
   /** Modifier class of the field wrapper, e.g. `field--linked`. */
   className?: string;
-  /** Shown but not editable, e.g. the balance the calculation does not use. */
-  readOnly?: boolean;
+  /** Shown but neither editable nor focusable, e.g. the balance the calculation does not use. */
+  disabled?: boolean;
 }
 
 function NumberField({
@@ -396,7 +396,7 @@ function NumberField({
   action,
   actionStatus,
   className,
-  readOnly,
+  disabled,
 }: NumberFieldProps) {
   const hintId = hint !== undefined ? `${id}-hint` : undefined;
   const errorId = error !== undefined ? `${id}-error` : undefined;
@@ -415,7 +415,7 @@ function NumberField({
           autoComplete="off"
           spellCheck={false}
           value={value}
-          readOnly={readOnly}
+          disabled={disabled}
           onChange={(e) => onChange(e.target.value)}
           aria-invalid={error !== undefined}
           aria-describedby={
