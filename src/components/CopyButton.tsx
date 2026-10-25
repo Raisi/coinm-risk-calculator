@@ -34,22 +34,28 @@ async function writeClipboard(text: string): Promise<boolean> {
 }
 
 interface CopyButtonProps {
-  /** Clipboard text; a function is evaluated at click time (e.g. for a timestamp). */
-  value: string | (() => string);
+  /**
+   * Clipboard text; a function is evaluated at click time (e.g. for a timestamp). `null`: nothing to copy,
+   * the button is disabled.
+   */
+  value: string | (() => string) | null;
   /** What is copied, for screen readers, e.g. "Positionswert USD". */
   subject: string;
   label?: string;
-  /** Visual variant: `copy__button--primary` (filled cyan) or `copy__button--outline`. */
+  /** Visual variant: `copy__button--primary` (filled cyan), `copy__button--outline` or `copy__button--icon`. */
   className?: string;
+  /** Shows only the icon; the text stays the accessible name and becomes the tooltip. */
+  iconOnly?: boolean;
 }
 
-export function CopyButton({ value, subject, label = "Kopieren", className }: CopyButtonProps) {
+export function CopyButton({ value, subject, label = "Kopieren", className, iconOnly }: CopyButtonProps) {
   const [state, setState] = useState<CopyState>("idle");
   const timer = useRef<number | undefined>(undefined);
 
   useEffect(() => () => window.clearTimeout(timer.current), []);
 
   async function copy() {
+    if (value === null) return;
     const ok = await writeClipboard(typeof value === "function" ? value() : value);
     setState(ok ? "copied" : "failed");
     window.clearTimeout(timer.current);
@@ -57,6 +63,7 @@ export function CopyButton({ value, subject, label = "Kopieren", className }: Co
   }
 
   const text = state === "copied" ? "Kopiert" : state === "failed" ? "Bitte manuell kopieren" : label;
+  const name = state === "idle" ? `${subject} kopieren` : undefined;
 
   return (
     <span className="copy">
@@ -65,10 +72,12 @@ export function CopyButton({ value, subject, label = "Kopieren", className }: Co
         className={className ? `copy__button ${className}` : "copy__button"}
         data-state={state}
         onClick={copy}
-        aria-label={state === "idle" ? `${subject} kopieren` : undefined}
+        disabled={value === null}
+        aria-label={name}
+        title={iconOnly ? (name ?? text) : undefined}
       >
         <Icon name={state === "copied" ? "check" : "copy"} size={14} />
-        {text}
+        {iconOnly ? <span className="sr-only">{text}</span> : text}
       </button>
       <span role="status" className="sr-only">
         {state === "copied" ? `${subject} kopiert` : state === "failed" ? `${subject} konnte nicht kopiert werden` : ""}

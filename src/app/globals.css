@@ -483,6 +483,15 @@ textarea {
   color: var(--text-secondary);
 }
 
+/* Label line; a copy button sits at its end. */
+.field__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
 .field__optional {
   color: var(--text-muted);
 }
@@ -1138,6 +1147,31 @@ textarea {
   border-color: rgba(239, 68, 68, 0.5);
   background: rgba(239, 68, 68, 0.12);
   color: var(--status-rot);
+}
+
+/* Copy glyph beside a field label (Entry, Stop, TP): 44px hit area, negative margins keep the label line compact. */
+.copy__button--icon {
+  flex: none;
+  width: var(--control-height);
+  height: var(--control-height);
+  margin: calc((var(--control-height) - 1.25rem) / -2);
+  padding: 0;
+  border: 0;
+  color: var(--text-muted);
+}
+
+/* Feedback is the glyph colour only; a tinted 44px square would spill over the label line. */
+.copy__button--icon[data-state] {
+  background: transparent;
+}
+
+.copy__button--icon[data-state="idle"]:hover:not(:disabled) {
+  color: var(--accent-primary);
+}
+
+.copy__button--icon:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 /* KPI tiles */
