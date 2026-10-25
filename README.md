@@ -33,6 +33,9 @@ Live: <https://raisi.github.io/coinm-risk-calculator/> · Fehler und Wünsche bi
 - **TP-Plan CRV-Stufen | Teil-TPs.** CRV-Stufen: TP-Preise (0,1-USD-Tick) für 1–10 R mit Abstand und Gewinn. Teil-TPs: drei
   TPs mit R und Anteil (Summe 100 %), je TP-Preis, abgerundete Kopiermenge in BTC (Rest auf dem letzten Teil),
   Gewinn sowie Gesamtgewinn und gewichteter CRV.
+- **Entry, Stop und TP kopieren.** Das Kopier-Symbol in jedem der drei Felder kopiert den Wert wie eingegeben (nicht
+  gerundet) im Kopierformat fürs Orderpanel: Punkt als Dezimalzeichen, ohne Tausenderpunkte, z. B. „84.707,5“ →
+  `84707.5`. Ohne positive Zahl im Feld ist es gesperrt.
 
 ## Aktueller Kurs
 

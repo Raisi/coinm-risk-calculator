@@ -16,9 +16,10 @@ import {
   type NumericField,
   type RawInputs,
 } from "@/lib/evaluate";
-import { formatDe, formatDeCompact, parseNumber } from "@/lib/format";
+import { formatDe, formatDeCompact, parseNumber, priceCopyValue } from "@/lib/format";
 import { DEFAULT_CRV, tpInputForCrvText } from "@/lib/form";
 import { livePriceEntry, TEXT_LIVE_PRICE_FAILED } from "@/lib/livePrice";
+import { CopyButton } from "./CopyButton";
 import { Icon } from "./Icon";
 import { useLivePrice } from "./useLivePrice";
 
@@ -109,7 +110,7 @@ export function InputPanel({
 
   const field = (
     name: NumericField,
-    extra: Partial<Pick<NumberFieldProps, "label" | "unit" | "hint" | "optional">> = {},
+    extra: Partial<Pick<NumberFieldProps, "label" | "unit" | "hint" | "optional" | "copyable">> = {},
   ) => (
     <NumberField
       id={name}
@@ -224,6 +225,7 @@ export function InputPanel({
               onChange({ entry });
             }}
             unit="USD"
+            copyable
             error={fieldError("entry")}
             action={
               <button
@@ -247,9 +249,9 @@ export function InputPanel({
                   : undefined
             }
           />
-          {field("stop", { unit: "USD" })}
+          {field("stop", { unit: "USD", copyable: true })}
         </div>
-        {field("tp", { unit: "USD", optional: true })}
+        {field("tp", { unit: "USD", optional: true, copyable: true })}
         <Segmented
           name="crvBasis"
           legend="CRV-Basis"
@@ -382,6 +384,8 @@ interface NumberFieldProps {
   className?: string;
   /** Shown but neither editable nor focusable, e.g. the balance the calculation does not use. */
   disabled?: boolean;
+  /** Copy button in the control: copies the typed number as `priceCopyValue`, disabled without one. */
+  copyable?: boolean;
 }
 
 function NumberField({
@@ -397,16 +401,22 @@ function NumberField({
   actionStatus,
   className,
   disabled,
+  copyable,
 }: NumberFieldProps) {
   const hintId = hint !== undefined ? `${id}-hint` : undefined;
   const errorId = error !== undefined ? `${id}-error` : undefined;
   const statusId = action !== undefined ? `${id}-status` : undefined;
   return (
     <div className={className === undefined ? "field" : `field ${className}`}>
-      <label htmlFor={id} className="field__label">
-        {label}
-        {optional && <span className="field__optional"> · optional</span>}
-      </label>
+      <div className="field__head">
+        <label htmlFor={id} className="field__label">
+          {label}
+          {optional && <span className="field__optional"> · optional</span>}
+        </label>
+        {copyable && (
+          <CopyButton value={priceCopyValue(value)} subject={label} className="copy__button--icon" iconOnly />
+        )}
+      </div>
       <span className="field__control">
         <input
           id={id}

@@ -7,6 +7,7 @@ import {
   formatDeCompact,
   formatLocalDateTime,
   parseNumber,
+  priceCopyValue,
   toCopyValue,
   toPlainDecimal,
   unitsToPlainDecimal,
@@ -295,6 +296,34 @@ describe("unitsToPlainDecimal", () => {
         );
       }
     }
+  });
+});
+
+describe("priceCopyValue (Entry/Stop/TP copy buttons)", () => {
+  it.each([
+    ["84.707,5", "84707.5"],
+    ["84707.5", "84707.5"],
+    ["84 707,5", "84707.5"],
+    // As typed, not rounded to the 0.1 tick or truncated.
+    ["84707,59", "84707.59"],
+    ["0,00000001", "0.00000001"],
+    // Digits beyond float precision are kept, not lost in a Number round-trip.
+    ["9007199254740993", "9007199254740993"],
+    ["84707,123456789012345678", "84707.123456789012345678"],
+    // No exponent at any magnitude, so the exchange field accepts it.
+    ["1000000000000000000000", "1000000000000000000000"],
+    // Plain form: no sign, leading or trailing zeros, no bare decimal point.
+    ["84707,50", "84707.5"],
+    ["+0084707,50", "84707.5"],
+    [",5", "0.5"],
+    ["116265.", "116265"],
+    ["116265", "116265"],
+  ])("%j -> %j", (input, expected) => {
+    expect(priceCopyValue(input)).toBe(expected);
+  });
+
+  it.each(["", "   ", "abc", "1,2,3", "0", "0,0", "-84707,5"])("%j has nothing to copy", (input) => {
+    expect(priceCopyValue(input)).toBeNull();
   });
 });
 

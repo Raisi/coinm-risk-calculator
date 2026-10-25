@@ -18,18 +18,22 @@ export const COPY_DECIMALS = {
 const PLAIN_NUMBER = /^[+-]?(\d+\.?\d*|\.\d+)$/;
 
 /**
- * Parses German ("81.005,9") or dot-decimal ("81005.9") input.
+ * German ("81.005,9") or dot-decimal ("81005.9") input as a plain dot-decimal string ("81005.9").
  * If the string contains a comma, dots are thousands separators and the comma is the decimal point.
- * Returns `null` for empty or invalid input.
+ * Returns `null` for empty, invalid or non-finite input.
  */
-export function parseNumber(input: string): number | null {
+function normalizeNumber(input: string): string | null {
   let normalized = input.trim().replace(/\s+/g, "");
   if (normalized.includes(",")) {
     normalized = normalized.replace(/\./g, "").replace(/,/g, ".");
   }
-  if (!PLAIN_NUMBER.test(normalized)) return null;
-  const value = Number(normalized);
-  return Number.isFinite(value) ? value : null;
+  return PLAIN_NUMBER.test(normalized) && Number.isFinite(Number(normalized)) ? normalized : null;
+}
+
+/** Parses input as `normalizeNumber` reads it; `null` for empty or invalid input. */
+export function parseNumber(input: string): number | null {
+  const normalized = normalizeNumber(input);
+  return normalized === null ? null : Number(normalized);
 }
 
 /**
@@ -105,6 +109,19 @@ export function unitsToPlainDecimal(units: bigint, decimals: number): string {
   const digits = units.toString().padStart(decimals + 1, "0");
   if (decimals === 0) return digits;
   return `${digits.slice(0, -decimals)}.${digits.slice(-decimals)}`.replace(/\.?0+$/, "");
+}
+
+/**
+ * Copy value of a typed price field: the digits exactly as typed (no float round-trip, no rounding) in the
+ * `toPlainDecimal` format ("84.707,50" -> "84707.5"). `null` unless the field holds a positive number.
+ */
+export function priceCopyValue(input: string): string | null {
+  const normalized = normalizeNumber(input);
+  if (normalized === null || Number(normalized) <= 0) return null;
+  const [intPart, fracPart = ""] = normalized.replace(/^\+/, "").split(".");
+  const whole = intPart.replace(/^0+(?=\d)/, "") || "0";
+  const fraction = fracPart.replace(/0+$/, "");
+  return fraction === "" ? whole : `${whole}.${fraction}`;
 }
 
 /** Copy value for the journal: same truncation, decimal comma, trailing zeros dropped. */
